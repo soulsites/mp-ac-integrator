@@ -3,7 +3,7 @@
  * Plugin Name: MemberPress ActiveCampaign Integration
  * Plugin URI: https://christianwedel.de
  * Description: Automatische Weiterleitung von MemberPress Registrierungen zu ActiveCampaign mit URL-Parameter-basierten Tags
- * Version: 2.0.0
+ * Version: 2.1.0
  * Author: Christian Wedel
  * Author URI: https://christianwedel.de
  * License: GPL v2 or later
@@ -12,6 +12,14 @@
  * Requires PHP: 7.4
  *
  * Changelog:
+ * 2.1.0 - Robustheit und Debug-Verbesserungen:
+ *       - Debug-Modus für Frontend-Troubleshooting hinzugefügt
+ *       - JavaScript robuster gegen Timing-Probleme gemacht
+ *       - MutationObserver für dynamisch geladene Formulare
+ *       - Form Submit Event Listener als zusätzliche Absicherung
+ *       - Verbesserte Tag-Erfassungs-Priorität (HTTP_REFERER höher priorisiert)
+ *       - Ausführliches Server-seitiges Logging
+ *       - Bessere Kompatibilität mit anderen AC-Integrationen
  * 2.0.0 - Vereinfachung und Fokus auf URL-Parameter:
  *       - Page Slug Tagging entfernt
  *       - Nur noch URL-Parameter-basiertes Tagging (z.B. ?source=messekoeln)
@@ -129,10 +137,20 @@ class MemberPress_ActiveCampaign_Integration {
     public function output_tracking_script() {
         $settings = get_option($this->option_name, array());
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
+        $debug_mode = isset($settings['debug_mode']) && $settings['debug_mode'] === '1';
 
         ?>
         <script type="text/javascript">
         (function() {
+            var DEBUG = <?php echo $debug_mode ? 'true' : 'false'; ?>;
+            var PARAM_NAME = '<?php echo esc_js($url_param_name); ?>';
+
+            function debugLog(message, data) {
+                if (DEBUG) {
+                    console.log('[MP-AC Debug] ' + message, data || '');
+                }
+            }
+
             // Tag-Extraktion clientseitig - nur URL Parameter
             function extractTags() {
                 var tags = [];
@@ -140,11 +158,12 @@ class MemberPress_ActiveCampaign_Integration {
 
                 // URL Parameter extrahieren
                 var urlParams = new URLSearchParams(window.location.search);
-                var paramValue = urlParams.get('<?php echo esc_js($url_param_name); ?>');
+                var paramValue = urlParams.get(PARAM_NAME);
 
                 if (paramValue) {
                     var paramTag = paramValue.toLowerCase();
                     tags.push(paramTag);
+                    debugLog('Extracted tag from URL parameter "' + PARAM_NAME + '"', paramTag);
                 }
 
                 return tags;
@@ -165,12 +184,14 @@ class MemberPress_ActiveCampaign_Integration {
                 document.cookie = 'mepr_ac_tags_js=' + encodeURIComponent(cookieData) +
                                 '; expires=' + expires.toUTCString() + '; path=/';
 
-                console.log('MemberPress AC Integration: Tags captured', tags);
+                debugLog('Tags saved to cookie', tags);
             }
 
             // Hidden Field in MemberPress-Formulare einfügen
             function injectTagsIntoForms() {
-                var forms = document.querySelectorAll('form.mepr-signup-form, form.mepr_form');
+                var forms = document.querySelectorAll('form.mepr-signup-form, form.mepr_form, form[action*="mepr"]');
+
+                debugLog('Found ' + forms.length + ' MemberPress forms');
 
                 forms.forEach(function(form) {
                     // Prüfen, ob bereits ein Hidden Field existiert
@@ -182,7 +203,11 @@ class MemberPress_ActiveCampaign_Integration {
                         hiddenField.value = tags.join(',');
                         form.appendChild(hiddenField);
 
-                        console.log('MemberPress AC Integration: Tags injected into form', tags);
+                        debugLog('Tags injected into form', tags);
+                    } else if (existingField && tags.length > 0) {
+                        // Update existing field
+                        existingField.value = tags.join(',');
+                        debugLog('Existing tag field updated', tags);
                     }
 
                     // Auch die URL speichern
@@ -193,20 +218,102 @@ class MemberPress_ActiveCampaign_Integration {
                         urlField.name = 'mepr_ac_url';
                         urlField.value = window.location.href;
                         form.appendChild(urlField);
+                        debugLog('URL field injected', window.location.href);
+                    } else {
+                        existingUrlField.value = window.location.href;
+                    }
+
+                    // Event Listener für Form Submit hinzufügen (als zusätzliche Absicherung)
+                    if (!form.dataset.meprAcListenerAdded) {
+                        form.addEventListener('submit', function() {
+                            var tagField = form.querySelector('input[name="mepr_ac_tags"]');
+                            var urlField = form.querySelector('input[name="mepr_ac_url"]');
+
+                            debugLog('Form submitting with tags', tagField ? tagField.value : 'none');
+                            debugLog('Form submitting with URL', urlField ? urlField.value : 'none');
+
+                            // Letzte Chance: Falls Fields noch nicht existieren, jetzt einfügen
+                            if (!tagField && tags.length > 0) {
+                                var hiddenField = document.createElement('input');
+                                hiddenField.type = 'hidden';
+                                hiddenField.name = 'mepr_ac_tags';
+                                hiddenField.value = tags.join(',');
+                                form.appendChild(hiddenField);
+                                debugLog('Emergency tag injection on submit', tags);
+                            }
+
+                            if (!urlField) {
+                                var urlFieldNew = document.createElement('input');
+                                urlFieldNew.type = 'hidden';
+                                urlFieldNew.name = 'mepr_ac_url';
+                                urlFieldNew.value = window.location.href;
+                                form.appendChild(urlFieldNew);
+                            }
+                        });
+                        form.dataset.meprAcListenerAdded = 'true';
                     }
                 });
+
+                return forms.length;
             }
 
             // Sofort ausführen
             if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', injectTagsIntoForms);
+                document.addEventListener('DOMContentLoaded', function() {
+                    injectTagsIntoForms();
+                });
             } else {
                 injectTagsIntoForms();
             }
 
+            // Mutation Observer für dynamisch geladene Formulare
+            var observer = new MutationObserver(function(mutations) {
+                var formsAdded = false;
+                mutations.forEach(function(mutation) {
+                    mutation.addedNodes.forEach(function(node) {
+                        if (node.nodeType === 1) { // Element node
+                            if (node.matches && (node.matches('form.mepr-signup-form') ||
+                                node.matches('form.mepr_form') ||
+                                node.matches('form[action*="mepr"]'))) {
+                                formsAdded = true;
+                            } else if (node.querySelector) {
+                                var forms = node.querySelectorAll('form.mepr-signup-form, form.mepr_form, form[action*="mepr"]');
+                                if (forms.length > 0) {
+                                    formsAdded = true;
+                                }
+                            }
+                        }
+                    });
+                });
+
+                if (formsAdded) {
+                    debugLog('New forms detected, injecting tags');
+                    injectTagsIntoForms();
+                }
+            });
+
+            // Observer starten
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+
             // Auch nach AJAX-Laden nochmal prüfen (für dynamische Formulare)
-            setTimeout(injectTagsIntoForms, 1000);
-            setTimeout(injectTagsIntoForms, 3000);
+            setTimeout(function() {
+                var count = injectTagsIntoForms();
+                debugLog('Delayed injection check (1s), found forms: ' + count);
+            }, 1000);
+
+            setTimeout(function() {
+                var count = injectTagsIntoForms();
+                debugLog('Delayed injection check (3s), found forms: ' + count);
+            }, 3000);
+
+            debugLog('Script initialized with parameter "' + PARAM_NAME + '"', {
+                currentUrl: window.location.href,
+                tags: tags,
+                debug: DEBUG
+            });
         })();
         </script>
         <?php
@@ -240,6 +347,9 @@ class MemberPress_ActiveCampaign_Integration {
         // URL Parameter Name
         $sanitized['url_param_name'] = isset($input['url_param_name']) ? sanitize_key($input['url_param_name']) : 'source';
 
+        // Debug Mode
+        $sanitized['debug_mode'] = isset($input['debug_mode']) ? '1' : '0';
+
         return $sanitized;
     }
 
@@ -252,6 +362,7 @@ class MemberPress_ActiveCampaign_Integration {
         $api_url = isset($settings['api_url']) ? $settings['api_url'] : '';
         $api_key = isset($settings['api_key']) ? $settings['api_key'] : '';
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
+        $debug_mode = isset($settings['debug_mode']) && $settings['debug_mode'] === '1';
 
         ?>
         <div class="wrap mepr-ac-settings">
@@ -342,6 +453,27 @@ class MemberPress_ActiveCampaign_Integration {
                                 <?php _e('Name des URL Parameters (z.B. "source", "utm_source", "campaign").', 'mepr-ac-integration'); ?><br>
                                 <strong><?php _e('Beispiel:', 'mepr-ac-integration'); ?></strong>
                                 <code>example.com/premium/?source=messekoeln</code> → Tag: <code>messekoeln</code>
+                            </p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th scope="row">
+                            <label for="debug_mode">
+                                <?php _e('Debug Modus', 'mepr-ac-integration'); ?>
+                            </label>
+                        </th>
+                        <td>
+                            <label>
+                                <input type="checkbox"
+                                       id="debug_mode"
+                                       name="<?php echo $this->option_name; ?>[debug_mode]"
+                                       value="1"
+                                       <?php checked($debug_mode, true); ?>>
+                                <?php _e('Debug-Meldungen in Browser Console anzeigen', 'mepr-ac-integration'); ?>
+                            </label>
+                            <p class="description">
+                                <?php _e('Aktiviere dies, um detaillierte Informationen über das Tag-Tracking in der Browser-Console zu sehen. Nützlich für Troubleshooting.', 'mepr-ac-integration'); ?>
                             </p>
                         </td>
                     </tr>
@@ -1024,12 +1156,16 @@ class MemberPress_ActiveCampaign_Integration {
         $tags = array();
         $source_found = false;
 
-        // Priorität 1: Tags aus dem POST mepr_ac_tags field (vom JavaScript injiziert)
-        if (isset($_POST['mepr_ac_tags']) && !empty($_POST['mepr_ac_tags'])) {
-            $posted_tags = sanitize_text_field($_POST['mepr_ac_tags']);
-            $tags = array_map('trim', explode(',', $posted_tags));
-            $tags = $this->normalize_tags($tags);
-            $this->log_error('Source 1: Found tags in POST mepr_ac_tags: ' . implode(', ', $tags));
+        $this->log_error('=== TAG COLLECTION STARTED ===');
+        $this->log_error('POST data: ' . print_r(array_keys($_POST), true));
+        $this->log_error('Cookie data: ' . print_r(array_keys($_COOKIE), true));
+        $this->log_error('HTTP_REFERER: ' . (isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'not set'));
+
+        // Priorität 1: Tags direkt aus aktueller URL extrahieren (falls noch in $_GET vorhanden)
+        $current_url_tags = $this->extract_tags_from_current_url();
+        if (!empty($current_url_tags)) {
+            $tags = $this->normalize_tags($current_url_tags);
+            $this->log_error('Source 1 (HIGHEST PRIORITY): Found tags in current URL ($_GET): ' . implode(', ', $tags));
             $source_found = true;
         }
 
@@ -1041,10 +1177,38 @@ class MemberPress_ActiveCampaign_Integration {
                 $tags = $this->normalize_tags($tags);
                 $this->log_error('Source 2: Extracted tags from POST mepr_ac_url: ' . implode(', ', $tags) . ' (URL: ' . $posted_url . ')');
                 $source_found = true;
+            } else {
+                $this->log_error('Source 2: POST mepr_ac_url present but no tags found: ' . $posted_url);
             }
         }
 
-        // Priorität 3: Tags aus JavaScript-Cookie laden
+        // Priorität 3: Tags aus dem POST mepr_ac_tags field (vom JavaScript injiziert)
+        if (!$source_found && isset($_POST['mepr_ac_tags']) && !empty($_POST['mepr_ac_tags'])) {
+            $posted_tags = sanitize_text_field($_POST['mepr_ac_tags']);
+            $tags = array_map('trim', explode(',', $posted_tags));
+            $tags = $this->normalize_tags($tags);
+            $this->log_error('Source 3: Found tags in POST mepr_ac_tags: ' . implode(', ', $tags));
+            $source_found = true;
+        }
+
+        // Priorität 4: Tags aus HTTP_REFERER extrahieren (wichtig!)
+        if (!$source_found) {
+            $referer = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '';
+            if (!empty($referer)) {
+                $referer_tags = $this->extract_tags_from_url($referer);
+                if (!empty($referer_tags)) {
+                    $tags = $this->normalize_tags($referer_tags);
+                    $this->log_error('Source 4: Extracted tags from HTTP_REFERER: ' . implode(', ', $tags) . ' (Referer: ' . $referer . ')');
+                    $source_found = true;
+                } else {
+                    $this->log_error('Source 4: HTTP_REFERER present but no tags found: ' . $referer);
+                }
+            } else {
+                $this->log_error('Source 4: HTTP_REFERER not set');
+            }
+        }
+
+        // Priorität 5: Tags aus JavaScript-Cookie laden
         if (!$source_found && isset($_COOKIE['mepr_ac_tags_js']) && !empty($_COOKIE['mepr_ac_tags_js'])) {
             $cookie_data = json_decode(stripslashes($_COOKIE['mepr_ac_tags_js']), true);
             if ($cookie_data && isset($cookie_data['tags']) && is_array($cookie_data['tags'])) {
@@ -1053,15 +1217,15 @@ class MemberPress_ActiveCampaign_Integration {
                 if (time() - $timestamp <= (7 * 24 * 60 * 60)) {
                     $tags = $this->normalize_tags($cookie_data['tags']);
                     $cookie_url = isset($cookie_data['url']) ? $cookie_data['url'] : 'unknown';
-                    $this->log_error('Source 3: Found tags in JavaScript cookie: ' . implode(', ', $tags) . ' (from URL: ' . $cookie_url . ')');
+                    $this->log_error('Source 5: Found tags in JavaScript cookie: ' . implode(', ', $tags) . ' (from URL: ' . $cookie_url . ')');
                     $source_found = true;
                 } else {
-                    $this->log_error('Source 3: JavaScript cookie expired (older than 7 days)');
+                    $this->log_error('Source 5: JavaScript cookie expired (older than 7 days)');
                 }
             }
         }
 
-        // Priorität 4: Tags aus PHP-Cookie laden
+        // Priorität 6: Tags aus PHP-Cookie laden
         if (!$source_found && isset($_COOKIE['mepr_ac_tags']) && !empty($_COOKIE['mepr_ac_tags'])) {
             $cookie_data = json_decode(stripslashes($_COOKIE['mepr_ac_tags']), true);
             if ($cookie_data && isset($cookie_data['tags']) && is_array($cookie_data['tags'])) {
@@ -1069,48 +1233,42 @@ class MemberPress_ActiveCampaign_Integration {
                 $timestamp = isset($cookie_data['timestamp']) ? intval($cookie_data['timestamp']) : 0;
                 if (time() - $timestamp <= (7 * 24 * 60 * 60)) {
                     $tags = $this->normalize_tags($cookie_data['tags']);
-                    $this->log_error('Source 4: Found tags in PHP cookie: ' . implode(', ', $tags));
+                    $this->log_error('Source 6: Found tags in PHP cookie: ' . implode(', ', $tags));
                     $source_found = true;
                 } else {
-                    $this->log_error('Source 4: PHP cookie expired (older than 7 days)');
+                    $this->log_error('Source 6: PHP cookie expired (older than 7 days)');
                 }
             }
         }
 
-        // Priorität 5: Tags aus der Session laden
+        // Priorität 7: Tags aus der Session laden
         if (!$source_found) {
             $session_tags = $this->get_stored_tags();
             if (!empty($session_tags)) {
                 $tags = $this->normalize_tags($session_tags);
-                $this->log_error('Source 5: Found tags in session: ' . implode(', ', $tags));
+                $this->log_error('Source 7: Found tags in session: ' . implode(', ', $tags));
                 $source_found = true;
             }
         }
 
-        // Priorität 6: Tags aus dem POST mepr_current_url field extrahieren
-        if (!$source_found && isset($_POST['mepr_current_url']) && !empty($_POST['mepr_current_url'])) {
-            $current_url = esc_url_raw($_POST['mepr_current_url']);
-            $tags = $this->extract_tags_from_url($current_url);
-            if (!empty($tags)) {
-                $tags = $this->normalize_tags($tags);
-                $this->log_error('Source 6: Extracted tags from POST mepr_current_url: ' . implode(', ', $tags) . ' (URL: ' . $current_url . ')');
-                $source_found = true;
-            }
-        }
-
-        // Priorität 7: Fallback - Versuche Tags aus dem Referer zu extrahieren
+        // Priorität 8: Fallback - wp_get_referer()
         if (!$source_found) {
-            $this->log_error('Source 7: Falling back to referer extraction');
+            $this->log_error('Source 8: Falling back to wp_get_referer()');
             $tags = $this->extract_tags();
             if (!empty($tags)) {
                 $tags = $this->normalize_tags($tags);
-                $this->log_error('Source 7: Extracted tags from referer: ' . implode(', ', $tags));
+                $this->log_error('Source 8: Extracted tags from wp_get_referer: ' . implode(', ', $tags));
+                $source_found = true;
             } else {
-                $this->log_error('Source 7: No tags found in referer');
+                $this->log_error('Source 8: No tags found in wp_get_referer');
             }
         }
 
-        return array_unique(array_filter($tags));
+        $final_tags = array_unique(array_filter($tags));
+        $this->log_error('=== TAG COLLECTION COMPLETED ===');
+        $this->log_error('Final tags: ' . (!empty($final_tags) ? implode(', ', $final_tags) : 'NONE'));
+
+        return $final_tags;
     }
 
     private function normalize_tags($tags) {
