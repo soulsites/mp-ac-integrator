@@ -1509,9 +1509,36 @@ class MemberPress_ActiveCampaign_Integration {
         if (isset($tag_body['tag']['id'])) {
             $tag_id = $tag_body['tag']['id'];
             $this->log_error('Tag created successfully with ID: ' . $tag_id);
+        } elseif ($tag_response_code === 422) {
+            // Bei 422 könnte das Tag bereits existieren - versuchen wir es zu finden
+            $this->log_error('Tag creation returned 422 (likely duplicate), searching for existing tag...');
+
+            // Tag per GET suchen
+            $search_response = wp_remote_get($this->api_url . '/api/3/tags?search=' . urlencode($tag_name), array(
+                'headers' => array(
+                    'Api-Token' => $this->api_key
+                ),
+                'timeout' => 15
+            ));
+
+            if (!is_wp_error($search_response) && wp_remote_retrieve_response_code($search_response) === 200) {
+                $search_body = json_decode(wp_remote_retrieve_body($search_response), true);
+                $this->log_error('Tag search response: ' . wp_remote_retrieve_body($search_response));
+
+                // Durch alle gefundenen Tags iterieren und nach exakter Übereinstimmung suchen
+                if (isset($search_body['tags']) && is_array($search_body['tags'])) {
+                    foreach ($search_body['tags'] as $tag) {
+                        if (isset($tag['tag']) && strtolower($tag['tag']) === strtolower($tag_name)) {
+                            $tag_id = $tag['id'];
+                            $this->log_error('Found existing tag with ID: ' . $tag_id);
+                            break;
+                        }
+                    }
+                }
+            }
         } elseif (isset($tag_body['errors'])) {
             $this->log_error('Tag creation returned errors: ' . json_encode($tag_body['errors']));
-            // Wenn Tag bereits existiert, ID aus Fehler extrahieren
+            // Wenn Tag bereits existiert, ID aus Fehler extrahieren (alte API-Version)
             foreach ($tag_body['errors'] as $error) {
                 if (isset($error['code']) && $error['code'] === 'duplicate' && isset($error['tag_id'])) {
                     $tag_id = $error['tag_id'];
