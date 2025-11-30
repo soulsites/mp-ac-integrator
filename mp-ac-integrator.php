@@ -111,31 +111,21 @@ class MemberPress_ActiveCampaign_Integration {
     public function sanitize_settings($input) {
         $sanitized = array();
 
-        if (isset($input['api_url'])) {
-            $sanitized['api_url'] = esc_url_raw(rtrim($input['api_url'], '/'));
-        }
-
-        if (isset($input['api_key'])) {
-            $sanitized['api_key'] = sanitize_text_field($input['api_key']);
-        }
+        // API Einstellungen
+        $sanitized['api_url'] = isset($input['api_url']) ? esc_url_raw(rtrim($input['api_url'], '/')) : '';
+        $sanitized['api_key'] = isset($input['api_key']) ? sanitize_text_field($input['api_key']) : '';
 
         // Checkboxen: Explizit false setzen wenn nicht vorhanden
         $sanitized['enable_page_slug'] = isset($input['enable_page_slug']) ? true : false;
         $sanitized['enable_url_param'] = isset($input['enable_url_param']) ? true : false;
         $sanitized['require_url_param'] = isset($input['require_url_param']) ? true : false;
 
-        if (isset($input['url_param_name'])) {
-            $sanitized['url_param_name'] = sanitize_key($input['url_param_name']);
-        }
+        // Textfelder: Immer speichern, auch wenn leer
+        $sanitized['url_param_name'] = isset($input['url_param_name']) ? sanitize_key($input['url_param_name']) : 'source';
 
-        // Prefix-Felder: sanitize_text_field verwenden statt sanitize_key
-        if (isset($input['page_slug_prefix'])) {
-            $sanitized['page_slug_prefix'] = sanitize_text_field($input['page_slug_prefix']);
-        }
-
-        if (isset($input['url_param_prefix'])) {
-            $sanitized['url_param_prefix'] = sanitize_text_field($input['url_param_prefix']);
-        }
+        // Prefix-Felder: sanitize_text_field verwenden, erlaubt leere Strings
+        $sanitized['page_slug_prefix'] = isset($input['page_slug_prefix']) ? sanitize_text_field($input['page_slug_prefix']) : '';
+        $sanitized['url_param_prefix'] = isset($input['url_param_prefix']) ? sanitize_text_field($input['url_param_prefix']) : '';
 
         return $sanitized;
     }
