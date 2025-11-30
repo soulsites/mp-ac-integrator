@@ -638,15 +638,6 @@ class MemberPress_ActiveCampaign_Integration {
     }
 
     private function extract_tags() {
-        $tags = array();
-        $settings = get_option($this->option_name, array());
-
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
-        $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
-
         $referer = wp_get_referer();
 
         if (empty($referer)) {
@@ -654,88 +645,19 @@ class MemberPress_ActiveCampaign_Integration {
         }
 
         if (empty($referer)) {
-            return $tags;
+            return array();
         }
 
-        // Page Slug extrahieren
-        if ($enable_page_slug) {
-            $path = parse_url($referer, PHP_URL_PATH);
-            if ($path) {
-                $url_parts = explode('/', rtrim($path, '/'));
-                $page_slug = end($url_parts);
-
-                if (!empty($page_slug) && $page_slug !== '') {
-                    $tag = $page_slug;
-                    if (!empty($page_slug_prefix)) {
-                        $tag = $page_slug_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
-                }
-            }
-        }
-
-        // URL Parameter extrahieren
-        if ($enable_url_param && !empty($url_param_name)) {
-            $query = parse_url($referer, PHP_URL_QUERY);
-            if ($query) {
-                parse_str($query, $params);
-                if (isset($params[$url_param_name]) && !empty($params[$url_param_name])) {
-                    $param_value = $params[$url_param_name];
-                    $tag = $param_value;
-                    if (!empty($url_param_prefix)) {
-                        $tag = $url_param_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
-                }
-            }
-        }
-
-        return array_unique(array_filter($tags));
+        // Verwende die zentrale Methode extract_tags_from_url
+        return $this->extract_tags_from_url($referer);
     }
 
     private function extract_tags_from_current_url() {
-        $tags = array();
-        $settings = get_option($this->option_name, array());
-
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
-        $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
-
-        // Aktuelle URL verwenden statt Referer
+        // Aktuelle URL erstellen
         $current_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
 
-        // Page Slug extrahieren
-        if ($enable_page_slug) {
-            $path = parse_url($current_url, PHP_URL_PATH);
-            if ($path) {
-                $url_parts = explode('/', rtrim($path, '/'));
-                $page_slug = end($url_parts);
-
-                if (!empty($page_slug) && $page_slug !== '') {
-                    $tag = $page_slug;
-                    if (!empty($page_slug_prefix)) {
-                        $tag = $page_slug_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
-                }
-            }
-        }
-
-        // URL Parameter extrahieren - direkt aus $_GET
-        if ($enable_url_param && !empty($url_param_name)) {
-            if (isset($_GET[$url_param_name]) && !empty($_GET[$url_param_name])) {
-                $param_value = $_GET[$url_param_name];
-                $tag = $param_value;
-                if (!empty($url_param_prefix)) {
-                    $tag = $url_param_prefix . '-' . $tag;
-                }
-                $tags[] = sanitize_text_field($tag);
-            }
-        }
-
-        return array_unique(array_filter($tags));
+        // Verwende die zentrale Methode extract_tags_from_url
+        return $this->extract_tags_from_url($current_url);
     }
 
     private function extract_tags_from_url($url) {
@@ -764,7 +686,10 @@ class MemberPress_ActiveCampaign_Integration {
                     if (!empty($page_slug_prefix)) {
                         $tag = $page_slug_prefix . '-' . $tag;
                     }
-                    $tags[] = sanitize_text_field($tag);
+                    $tag = $this->sanitize_tag_name($tag);
+                    if (!empty($tag)) {
+                        $tags[] = $tag;
+                    }
                 }
             }
         }
@@ -780,7 +705,10 @@ class MemberPress_ActiveCampaign_Integration {
                     if (!empty($url_param_prefix)) {
                         $tag = $url_param_prefix . '-' . $tag;
                     }
-                    $tags[] = sanitize_text_field($tag);
+                    $tag = $this->sanitize_tag_name($tag);
+                    if (!empty($tag)) {
+                        $tags[] = $tag;
+                    }
                 }
             }
         }
@@ -883,6 +811,14 @@ class MemberPress_ActiveCampaign_Integration {
             return false;
         }
 
+        // Tag-Name für ActiveCampaign sanitieren
+        $tag_name = $this->sanitize_tag_name($tag_name);
+
+        if (empty($tag_name)) {
+            $this->log_error('Tag name empty after sanitization');
+            return false;
+        }
+
         // Tag erstellen oder finden
         $tag_data = array(
             'tag' => array(
@@ -967,6 +903,36 @@ class MemberPress_ActiveCampaign_Integration {
 
         $this->log_error('Tag assignment failed with code ' . $assign_code . ': ' . wp_remote_retrieve_body($assign_response));
         return false;
+    }
+
+    private function sanitize_tag_name($tag) {
+        // Erst mit WordPress sanitize_text_field() bereinigen
+        $tag = sanitize_text_field($tag);
+
+        // Umlaute konvertieren
+        $tag = str_replace(
+            array('ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü', 'ß'),
+            array('ae', 'oe', 'ue', 'Ae', 'Oe', 'Ue', 'ss'),
+            $tag
+        );
+
+        // Leerzeichen durch Bindestriche ersetzen
+        $tag = str_replace(' ', '-', $tag);
+
+        // Nur alphanumerische Zeichen, Bindestriche und Unterstriche erlauben
+        $tag = preg_replace('/[^a-zA-Z0-9_-]/', '', $tag);
+
+        // Mehrfache Bindestriche/Unterstriche durch einzelne ersetzen
+        $tag = preg_replace('/-+/', '-', $tag);
+        $tag = preg_replace('/_+/', '_', $tag);
+
+        // Führende und folgende Bindestriche/Unterstriche entfernen
+        $tag = trim($tag, '-_');
+
+        // In Kleinbuchstaben konvertieren für Konsistenz
+        $tag = strtolower($tag);
+
+        return $tag;
     }
 
     private function is_configured() {
