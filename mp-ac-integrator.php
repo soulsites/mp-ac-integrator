@@ -603,15 +603,28 @@ class MemberPress_ActiveCampaign_Integration {
             $first_name = isset($user->first_name) ? sanitize_text_field($user->first_name) : '';
             $last_name = isset($user->last_name) ? sanitize_text_field($user->last_name) : '';
 
-            // Versuche zuerst Tags aus der Session zu laden
-            $tags = $this->get_stored_tags();
+            // Priorität 1: Tags aus dem POST mepr_current_url field extrahieren
+            $tags = array();
+            if (isset($_POST['mepr_current_url']) && !empty($_POST['mepr_current_url'])) {
+                $current_url = esc_url_raw($_POST['mepr_current_url']);
+                $tags = $this->extract_tags_from_url($current_url);
+                if (!empty($tags)) {
+                    $this->log_error('Using tags from POST mepr_current_url: ' . implode(', ', $tags) . ' (URL: ' . $current_url . ')');
+                }
+            }
 
-            // Fallback: Versuche Tags aus dem Referer zu extrahieren (alte Methode)
+            // Priorität 2: Versuche Tags aus der Session zu laden
             if (empty($tags)) {
-                $this->log_error('No tags in session, falling back to referer extraction');
+                $tags = $this->get_stored_tags();
+                if (!empty($tags)) {
+                    $this->log_error('Using tags from session: ' . implode(', ', $tags));
+                }
+            }
+
+            // Priorität 3: Fallback - Versuche Tags aus dem Referer zu extrahieren (alte Methode)
+            if (empty($tags)) {
+                $this->log_error('No tags in POST or session, falling back to referer extraction');
                 $tags = $this->extract_tags();
-            } else {
-                $this->log_error('Using tags from session: ' . implode(', ', $tags));
             }
 
             $this->send_to_activecampaign($email, $first_name, $last_name, $tags);
@@ -719,6 +732,56 @@ class MemberPress_ActiveCampaign_Integration {
                     $tag = $url_param_prefix . '-' . $tag;
                 }
                 $tags[] = sanitize_text_field($tag);
+            }
+        }
+
+        return array_unique(array_filter($tags));
+    }
+
+    private function extract_tags_from_url($url) {
+        $tags = array();
+        $settings = get_option($this->option_name, array());
+
+        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
+        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
+        $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
+        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
+        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
+
+        if (empty($url)) {
+            return $tags;
+        }
+
+        // Page Slug extrahieren
+        if ($enable_page_slug) {
+            $path = parse_url($url, PHP_URL_PATH);
+            if ($path) {
+                $url_parts = explode('/', rtrim($path, '/'));
+                $page_slug = end($url_parts);
+
+                if (!empty($page_slug) && $page_slug !== '') {
+                    $tag = $page_slug;
+                    if (!empty($page_slug_prefix)) {
+                        $tag = $page_slug_prefix . '-' . $tag;
+                    }
+                    $tags[] = sanitize_text_field($tag);
+                }
+            }
+        }
+
+        // URL Parameter extrahieren
+        if ($enable_url_param && !empty($url_param_name)) {
+            $query = parse_url($url, PHP_URL_QUERY);
+            if ($query) {
+                parse_str($query, $params);
+                if (isset($params[$url_param_name]) && !empty($params[$url_param_name])) {
+                    $param_value = $params[$url_param_name];
+                    $tag = $param_value;
+                    if (!empty($url_param_prefix)) {
+                        $tag = $url_param_prefix . '-' . $tag;
+                    }
+                    $tags[] = sanitize_text_field($tag);
+                }
             }
         }
 
