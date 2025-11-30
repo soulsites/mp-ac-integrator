@@ -1469,6 +1469,8 @@ class MemberPress_ActiveCampaign_Integration {
             return false;
         }
 
+        $this->log_error('=== TAG ASSIGNMENT STARTED for tag: ' . $tag_name . ' (contact: ' . $contact_id . ') ===');
+
         // Tag erstellen oder finden
         $tag_data = array(
             'tag' => array(
@@ -1476,6 +1478,9 @@ class MemberPress_ActiveCampaign_Integration {
                 'tagType' => 'contact'
             )
         );
+
+        $this->log_error('Sending tag creation request to: ' . $this->api_url . '/api/3/tags');
+        $this->log_error('Tag data: ' . json_encode($tag_data));
 
         $tag_response = wp_remote_post($this->api_url . '/api/3/tags', array(
             'headers' => array(
@@ -1491,25 +1496,34 @@ class MemberPress_ActiveCampaign_Integration {
             return false;
         }
 
-        $tag_body = json_decode(wp_remote_retrieve_body($tag_response), true);
+        $tag_response_code = wp_remote_retrieve_response_code($tag_response);
+        $tag_response_body = wp_remote_retrieve_body($tag_response);
+        $this->log_error('Tag creation response code: ' . $tag_response_code);
+        $this->log_error('Tag creation response body: ' . $tag_response_body);
+
+        $tag_body = json_decode($tag_response_body, true);
 
         // Tag ID aus Response oder Fehler extrahieren
         $tag_id = null;
 
         if (isset($tag_body['tag']['id'])) {
             $tag_id = $tag_body['tag']['id'];
+            $this->log_error('Tag created successfully with ID: ' . $tag_id);
         } elseif (isset($tag_body['errors'])) {
+            $this->log_error('Tag creation returned errors: ' . json_encode($tag_body['errors']));
             // Wenn Tag bereits existiert, ID aus Fehler extrahieren
             foreach ($tag_body['errors'] as $error) {
                 if (isset($error['code']) && $error['code'] === 'duplicate' && isset($error['tag_id'])) {
                     $tag_id = $error['tag_id'];
+                    $this->log_error('Tag already exists, extracted ID from error: ' . $tag_id);
                     break;
                 }
             }
         }
 
         if (empty($tag_id)) {
-            $this->log_error('No tag ID found for: ' . $tag_name);
+            $this->log_error('ERROR: No tag ID found for: ' . $tag_name);
+            $this->log_error('Full response analysis: ' . print_r($tag_body, true));
             return false;
         }
 
@@ -1520,6 +1534,9 @@ class MemberPress_ActiveCampaign_Integration {
                 'tag' => $tag_id
             )
         );
+
+        $this->log_error('Assigning tag ID ' . $tag_id . ' to contact ID ' . $contact_id);
+        $this->log_error('Contact tag data: ' . json_encode($contact_tag_data));
 
         $assign_response = wp_remote_post($this->api_url . '/api/3/contactTags', array(
             'headers' => array(
@@ -1536,22 +1553,30 @@ class MemberPress_ActiveCampaign_Integration {
         }
 
         $assign_code = wp_remote_retrieve_response_code($assign_response);
+        $assign_body_raw = wp_remote_retrieve_body($assign_response);
+        $this->log_error('Tag assignment response code: ' . $assign_code);
+        $this->log_error('Tag assignment response body: ' . $assign_body_raw);
 
         if ($assign_code === 200 || $assign_code === 201) {
+            $this->log_error('Tag successfully assigned to contact!');
+            $this->log_error('=== TAG ASSIGNMENT COMPLETED SUCCESSFULLY ===');
             return true;
         }
 
         // Tag Assignment kann auch 422 zurückgeben wenn bereits zugewiesen
-        $assign_body = json_decode(wp_remote_retrieve_body($assign_response), true);
+        $assign_body = json_decode($assign_body_raw, true);
         if (isset($assign_body['errors'])) {
             foreach ($assign_body['errors'] as $error) {
                 if (isset($error['code']) && $error['code'] === 'duplicate') {
+                    $this->log_error('Tag already assigned to contact (duplicate), returning success');
+                    $this->log_error('=== TAG ASSIGNMENT COMPLETED (ALREADY ASSIGNED) ===');
                     return true; // Tag ist bereits zugewiesen, das ist ok
                 }
             }
         }
 
-        $this->log_error('Tag assignment failed with code ' . $assign_code . ': ' . wp_remote_retrieve_body($assign_response));
+        $this->log_error('ERROR: Tag assignment failed with code ' . $assign_code);
+        $this->log_error('=== TAG ASSIGNMENT FAILED ===');
         return false;
     }
 
