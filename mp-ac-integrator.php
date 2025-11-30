@@ -2,8 +2,8 @@
 /**
  * Plugin Name: MemberPress ActiveCampaign Integration
  * Plugin URI: https://christianwedel.de
- * Description: Automatische Weiterleitung von MemberPress Registrierungen zu ActiveCampaign mit URL-basierten Tags
- * Version: 1.1.0
+ * Description: Automatische Weiterleitung von MemberPress Registrierungen zu ActiveCampaign mit URL-Parameter-basierten Tags
+ * Version: 2.0.0
  * Author: Christian Wedel
  * Author URI: https://christianwedel.de
  * License: GPL v2 or later
@@ -12,14 +12,16 @@
  * Requires PHP: 7.4
  *
  * Changelog:
+ * 2.0.0 - Vereinfachung und Fokus auf URL-Parameter:
+ *       - Page Slug Tagging entfernt
+ *       - Nur noch URL-Parameter-basiertes Tagging (z.B. ?source=messekoeln)
+ *       - Tagging erfolgt nur wenn der konfigurierte Parameter in der URL vorhanden ist
+ *       - Vereinfachte Settings-Oberfläche
+ *       - Aktualisierte Dokumentation
  * 1.1.0 - Robustheitsverbesserungen:
  *       - JavaScript-basierte URL-Erfassung hinzugefügt
  *       - Cookie-Fallback zusätzlich zu Sessions
  *       - Automatisches Einfügen von Hidden Fields in Formulare
- *       - Mehrfache Fallback-Methoden für Tag-Extraktion
- *       - Verbesserte Debug-Logs
- *       - Tag-Normalisierung (lowercase)
- *       - Bessere Fehlerbehandlung
  */
 
 if (!defined('ABSPATH')) {
@@ -126,48 +128,24 @@ class MemberPress_ActiveCampaign_Integration {
 
     public function output_tracking_script() {
         $settings = get_option($this->option_name, array());
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
 
         ?>
         <script type="text/javascript">
         (function() {
-            // Tag-Extraktion clientseitig
+            // Tag-Extraktion clientseitig - nur URL Parameter
             function extractTags() {
                 var tags = [];
                 var currentUrl = window.location.href;
 
-                // Page Slug extrahieren
-                <?php if ($enable_page_slug): ?>
-                var path = window.location.pathname;
-                var pathParts = path.replace(/\/$/, '').split('/');
-                var pageSlug = pathParts[pathParts.length - 1];
-
-                if (pageSlug && pageSlug !== '') {
-                    var slugTag = pageSlug.toLowerCase();
-                    <?php if (!empty($page_slug_prefix)): ?>
-                    slugTag = '<?php echo esc_js($page_slug_prefix); ?>' + '-' + slugTag;
-                    <?php endif; ?>
-                    tags.push(slugTag);
-                }
-                <?php endif; ?>
-
                 // URL Parameter extrahieren
-                <?php if ($enable_url_param && !empty($url_param_name)): ?>
                 var urlParams = new URLSearchParams(window.location.search);
                 var paramValue = urlParams.get('<?php echo esc_js($url_param_name); ?>');
 
                 if (paramValue) {
                     var paramTag = paramValue.toLowerCase();
-                    <?php if (!empty($url_param_prefix)): ?>
-                    paramTag = '<?php echo esc_js($url_param_prefix); ?>' + '-' + paramTag;
-                    <?php endif; ?>
                     tags.push(paramTag);
                 }
-                <?php endif; ?>
 
                 return tags;
             }
@@ -259,17 +237,8 @@ class MemberPress_ActiveCampaign_Integration {
         $sanitized['api_url'] = isset($input['api_url']) ? esc_url_raw(rtrim($input['api_url'], '/')) : '';
         $sanitized['api_key'] = isset($input['api_key']) ? sanitize_text_field($input['api_key']) : '';
 
-        // Checkboxen: Explizit false setzen wenn nicht vorhanden
-        $sanitized['enable_page_slug'] = isset($input['enable_page_slug']) ? true : false;
-        $sanitized['enable_url_param'] = isset($input['enable_url_param']) ? true : false;
-        $sanitized['require_url_param'] = isset($input['require_url_param']) ? true : false;
-
-        // Textfelder: Immer speichern, auch wenn leer
+        // URL Parameter Name
         $sanitized['url_param_name'] = isset($input['url_param_name']) ? sanitize_key($input['url_param_name']) : 'source';
-
-        // Prefix-Felder: sanitize_text_field verwenden, erlaubt leere Strings
-        $sanitized['page_slug_prefix'] = isset($input['page_slug_prefix']) ? sanitize_text_field($input['page_slug_prefix']) : '';
-        $sanitized['url_param_prefix'] = isset($input['url_param_prefix']) ? sanitize_text_field($input['url_param_prefix']) : '';
 
         return $sanitized;
     }
@@ -282,12 +251,7 @@ class MemberPress_ActiveCampaign_Integration {
         $settings = get_option($this->option_name, array());
         $api_url = isset($settings['api_url']) ? $settings['api_url'] : '';
         $api_key = isset($settings['api_key']) ? $settings['api_key'] : '';
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
-        $require_url_param = isset($settings['require_url_param']) ? $settings['require_url_param'] : false;
 
         ?>
         <div class="wrap mepr-ac-settings">
@@ -358,78 +322,13 @@ class MemberPress_ActiveCampaign_Integration {
 
                 <div class="mepr-ac-card">
                     <h2 class="mepr-ac-card-title"><?php _e('Tag Einstellungen', 'mepr-ac-integration'); ?></h2>
+                    <p class="mepr-ac-description"><?php _e('Das Plugin taggt E-Mails basierend auf einem URL-Parameter. Tags werden nur gesetzt, wenn der Parameter in der URL vorhanden ist.', 'mepr-ac-integration'); ?></p>
                 <table class="form-table mepr-ac-table">
 
                     <tr>
                         <th scope="row">
-                            <label for="enable_page_slug">
-                                <?php _e('Page Slug als Tag', 'mepr-ac-integration'); ?>
-                            </label>
-                        </th>
-                        <td>
-                            <label>
-                                <input type="checkbox"
-                                       id="enable_page_slug"
-                                       name="<?php echo $this->option_name; ?>[enable_page_slug]"
-                                       value="1"
-                                    <?php checked($enable_page_slug, true); ?>>
-                                <?php _e('Aktiviert', 'mepr-ac-integration'); ?>
-                            </label>
-                            <p class="description">
-                                <?php _e('Der letzte Teil der URL wird als Tag verwendet.', 'mepr-ac-integration'); ?><br>
-                                <strong><?php _e('Beispiel:', 'mepr-ac-integration'); ?></strong>
-                                <code>example.com/membership/premium/</code> → Tag: <code>premium</code>
-                            </p>
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <th scope="row">
-                            <label for="page_slug_prefix">
-                                <?php _e('Page Slug Prefix', 'mepr-ac-integration'); ?>
-                            </label>
-                        </th>
-                        <td>
-                            <input type="text"
-                                   id="page_slug_prefix"
-                                   name="<?php echo $this->option_name; ?>[page_slug_prefix]"
-                                   value="<?php echo esc_attr($page_slug_prefix); ?>"
-                                   class="regular-text"
-                                   placeholder="<?php _e('z.B. page', 'mepr-ac-integration'); ?>">
-                            <p class="description">
-                                <?php _e('Optional: Prefix für Page Slug Tags (z.B. "page" → "page-premium").', 'mepr-ac-integration'); ?><br>
-                                <?php _e('Leer lassen für kein Prefix.', 'mepr-ac-integration'); ?>
-                            </p>
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <th scope="row">
-                            <label for="enable_url_param">
-                                <?php _e('URL Parameter als Tag', 'mepr-ac-integration'); ?>
-                            </label>
-                        </th>
-                        <td>
-                            <label>
-                                <input type="checkbox"
-                                       id="enable_url_param"
-                                       name="<?php echo $this->option_name; ?>[enable_url_param]"
-                                       value="1"
-                                    <?php checked($enable_url_param, true); ?>>
-                                <?php _e('Aktiviert', 'mepr-ac-integration'); ?>
-                            </label>
-                            <p class="description">
-                                <?php _e('URL Parameter wird als zusätzliches Tag verwendet.', 'mepr-ac-integration'); ?><br>
-                                <strong><?php _e('Beispiel:', 'mepr-ac-integration'); ?></strong>
-                                <code>example.com/premium/?source=facebook</code> → Tag: <code>facebook</code>
-                            </p>
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <th scope="row">
                             <label for="url_param_name">
-                                <?php _e('Parameter Name', 'mepr-ac-integration'); ?>
+                                <?php _e('URL Parameter Name', 'mepr-ac-integration'); ?>
                             </label>
                         </th>
                         <td>
@@ -440,49 +339,9 @@ class MemberPress_ActiveCampaign_Integration {
                                    class="regular-text"
                                    placeholder="source">
                             <p class="description">
-                                <?php _e('Name des URL Parameters (z.B. "source", "utm_source", "campaign").', 'mepr-ac-integration'); ?>
-                            </p>
-                        </td>
-                    </tr>
-
-                    <tr>
-                        <th scope="row">
-                            <label for="url_param_prefix">
-                                <?php _e('URL Parameter Prefix', 'mepr-ac-integration'); ?>
-                            </label>
-                        </th>
-                        <td>
-                            <input type="text"
-                                   id="url_param_prefix"
-                                   name="<?php echo $this->option_name; ?>[url_param_prefix]"
-                                   value="<?php echo esc_attr($url_param_prefix); ?>"
-                                   class="regular-text"
-                                   placeholder="<?php _e('z.B. source', 'mepr-ac-integration'); ?>">
-                            <p class="description">
-                                <?php _e('Optional: Prefix für URL Parameter Tags (z.B. "source" → "source-facebook").', 'mepr-ac-integration'); ?><br>
-                                <?php _e('Leer lassen für kein Prefix.', 'mepr-ac-integration'); ?>
-                            </p>
-                        </td>
-                    </tr>
-
-                    <tr id="require_param_row" style="display: none;">
-                        <th scope="row">
-                            <label for="require_url_param">
-                                <?php _e('Parameter erforderlich', 'mepr-ac-integration'); ?>
-                            </label>
-                        </th>
-                        <td>
-                            <label>
-                                <input type="checkbox"
-                                       id="require_url_param"
-                                       name="<?php echo $this->option_name; ?>[require_url_param]"
-                                       value="1"
-                                    <?php checked($require_url_param, true); ?>>
-                                <?php _e('Aktiviert', 'mepr-ac-integration'); ?>
-                            </label>
-                            <p class="description">
-                                <?php _e('Kein Tracking durchführen, wenn kein URL Parameter vorhanden ist.', 'mepr-ac-integration'); ?><br>
-                                <?php _e('Diese Option ist nur aktiv, wenn Page Slug Tracking deaktiviert und URL Parameter Tracking aktiviert ist.', 'mepr-ac-integration'); ?>
+                                <?php _e('Name des URL Parameters (z.B. "source", "utm_source", "campaign").', 'mepr-ac-integration'); ?><br>
+                                <strong><?php _e('Beispiel:', 'mepr-ac-integration'); ?></strong>
+                                <code>example.com/premium/?source=messekoeln</code> → Tag: <code>messekoeln</code>
                             </p>
                         </td>
                     </tr>
@@ -540,15 +399,12 @@ class MemberPress_ActiveCampaign_Integration {
             <div class="mepr-ac-card">
             <h2 class="mepr-ac-card-title"><?php _e('Wie es funktioniert', 'mepr-ac-integration'); ?></h2>
             <ol>
-                <li><?php _e('Wenn sich jemand über ein MemberPress Registrierungsformular anmeldet, wird die E-Mail automatisch zu ActiveCampaign gesendet.', 'mepr-ac-integration'); ?></li>
+                <li><?php _e('Wenn ein Besucher eine URL mit dem konfigurierten Parameter aufruft (z.B. ?source=messekoeln), wird der Parameterwert gespeichert.', 'mepr-ac-integration'); ?></li>
+                <li><?php _e('Wenn sich der Besucher über ein MemberPress Registrierungsformular anmeldet, wird die E-Mail automatisch zu ActiveCampaign gesendet.', 'mepr-ac-integration'); ?></li>
                 <li><?php _e('Der Contact wird in ActiveCampaign erstellt oder aktualisiert.', 'mepr-ac-integration'); ?></li>
-                <li><?php _e('Je nach Einstellung werden automatisch Tags vergeben:', 'mepr-ac-integration'); ?>
-                    <ul style="list-style: disc; margin-left: 20px;">
-                        <li><strong><?php _e('Page Slug:', 'mepr-ac-integration'); ?></strong> <?php _e('Der letzte Teil der URL-Pfad', 'mepr-ac-integration'); ?></li>
-                        <li><strong><?php _e('URL Parameter:', 'mepr-ac-integration'); ?></strong> <?php _e('Wert aus dem URL Parameter (z.B. ?source=facebook)', 'mepr-ac-integration'); ?></li>
-                    </ul>
-                </li>
+                <li><?php _e('Der gespeicherte Parameterwert wird als Tag in ActiveCampaign zugewiesen (z.B. "messekoeln").', 'mepr-ac-integration'); ?></li>
                 <li><?php _e('Tags werden automatisch in ActiveCampaign erstellt, falls sie noch nicht existieren.', 'mepr-ac-integration'); ?></li>
+                <li><?php _e('Wichtig: Wenn kein URL-Parameter vorhanden war, wird auch kein Tag gesetzt.', 'mepr-ac-integration'); ?></li>
             </ol>
 
             <h3><?php _e('Beispiele', 'mepr-ac-integration'); ?></h3>
@@ -556,25 +412,29 @@ class MemberPress_ActiveCampaign_Integration {
                 <thead>
                 <tr>
                     <th><?php _e('URL', 'mepr-ac-integration'); ?></th>
-                    <th><?php _e('Tags (ohne Prefix)', 'mepr-ac-integration'); ?></th>
-                    <th><?php _e('Tags (mit Prefix)', 'mepr-ac-integration'); ?></th>
+                    <th><?php _e('Tag in ActiveCampaign', 'mepr-ac-integration'); ?></th>
                 </tr>
                 </thead>
                 <tbody>
                 <tr>
-                    <td><code>example.com/premium/</code></td>
-                    <td><code>premium</code></td>
-                    <td><code>page-premium</code></td>
+                    <td><code>example.com/premium/?source=messekoeln</code></td>
+                    <td><code>messekoeln</code></td>
                 </tr>
                 <tr>
                     <td><code>example.com/basic/?source=facebook</code></td>
-                    <td><code>basic, facebook</code></td>
-                    <td><code>page-basic, source-facebook</code></td>
+                    <td><code>facebook</code></td>
                 </tr>
                 <tr>
                     <td><code>example.com/membership/?source=instagram</code></td>
-                    <td><code>membership, instagram</code></td>
-                    <td><code>page-membership, source-instagram</code></td>
+                    <td><code>instagram</code></td>
+                </tr>
+                <tr>
+                    <td><code>example.com/membership/?utm_source=newsletter</code></td>
+                    <td><code>newsletter</code> <em>(wenn "utm_source" als Parameter konfiguriert)</em></td>
+                </tr>
+                <tr>
+                    <td><code>example.com/premium/</code> <em>(ohne Parameter)</em></td>
+                    <td><em><?php _e('Kein Tag', 'mepr-ac-integration'); ?></em></td>
                 </tr>
                 </tbody>
             </table>
@@ -583,26 +443,6 @@ class MemberPress_ActiveCampaign_Integration {
 
         <script type="text/javascript">
             jQuery(document).ready(function($) {
-                // Bedingte Anzeige der "Parameter erforderlich" Checkbox
-                function toggleRequireParamRow() {
-                    var pageSlugEnabled = $('#enable_page_slug').is(':checked');
-                    var urlParamEnabled = $('#enable_url_param').is(':checked');
-
-                    if (!pageSlugEnabled && urlParamEnabled) {
-                        $('#require_param_row').show();
-                    } else {
-                        $('#require_param_row').hide();
-                    }
-                }
-
-                // Initial anzeigen/verstecken
-                toggleRequireParamRow();
-
-                // Bei Änderungen aktualisieren
-                $('#enable_page_slug, #enable_url_param').on('change', function() {
-                    toggleRequireParamRow();
-                });
-
                 // Test Connection
                 $('#test-connection').on('click', function() {
                     var button = $(this);
@@ -1159,18 +999,14 @@ class MemberPress_ActiveCampaign_Integration {
             // Tags aus verschiedenen Quellen sammeln
             $tags = $this->collect_tags_from_all_sources();
 
-            // Prüfe, ob Tracking übersprungen werden soll
-            if ($this->should_skip_tracking($tags)) {
-                $this->log_error('Tracking skipped: require_url_param is enabled but no URL parameter found');
+            // Wenn keine Tags gefunden wurden, kein Tracking durchführen
+            if (empty($tags)) {
+                $this->log_error('No tags found - skipping ActiveCampaign tagging (no URL parameter present)');
                 $this->clear_stored_tags();
                 return;
             }
 
-            if (empty($tags)) {
-                $this->log_error('WARNING: No tags found from any source!');
-            } else {
-                $this->log_error('Final tags to be sent to ActiveCampaign: ' . implode(', ', $tags));
-            }
+            $this->log_error('Final tags to be sent to ActiveCampaign: ' . implode(', ', $tags));
 
             $this->send_to_activecampaign($email, $first_name, $last_name, $tags);
 
@@ -1295,12 +1131,7 @@ class MemberPress_ActiveCampaign_Integration {
     private function extract_tags() {
         $tags = array();
         $settings = get_option($this->option_name, array());
-
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
 
         $referer = wp_get_referer();
 
@@ -1312,35 +1143,14 @@ class MemberPress_ActiveCampaign_Integration {
             return $tags;
         }
 
-        // Page Slug extrahieren
-        if ($enable_page_slug) {
-            $path = parse_url($referer, PHP_URL_PATH);
-            if ($path) {
-                $url_parts = explode('/', rtrim($path, '/'));
-                $page_slug = end($url_parts);
-
-                if (!empty($page_slug) && $page_slug !== '') {
-                    $tag = $page_slug;
-                    if (!empty($page_slug_prefix)) {
-                        $tag = $page_slug_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
-                }
-            }
-        }
-
         // URL Parameter extrahieren
-        if ($enable_url_param && !empty($url_param_name)) {
+        if (!empty($url_param_name)) {
             $query = parse_url($referer, PHP_URL_QUERY);
             if ($query) {
                 parse_str($query, $params);
                 if (isset($params[$url_param_name]) && !empty($params[$url_param_name])) {
                     $param_value = $params[$url_param_name];
-                    $tag = $param_value;
-                    if (!empty($url_param_prefix)) {
-                        $tag = $url_param_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
+                    $tags[] = sanitize_text_field($param_value);
                 }
             }
         }
@@ -1351,42 +1161,13 @@ class MemberPress_ActiveCampaign_Integration {
     private function extract_tags_from_current_url() {
         $tags = array();
         $settings = get_option($this->option_name, array());
-
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
-
-        // Aktuelle URL verwenden statt Referer
-        $current_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
-
-        // Page Slug extrahieren
-        if ($enable_page_slug) {
-            $path = parse_url($current_url, PHP_URL_PATH);
-            if ($path) {
-                $url_parts = explode('/', rtrim($path, '/'));
-                $page_slug = end($url_parts);
-
-                if (!empty($page_slug) && $page_slug !== '') {
-                    $tag = $page_slug;
-                    if (!empty($page_slug_prefix)) {
-                        $tag = $page_slug_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
-                }
-            }
-        }
 
         // URL Parameter extrahieren - direkt aus $_GET
-        if ($enable_url_param && !empty($url_param_name)) {
+        if (!empty($url_param_name)) {
             if (isset($_GET[$url_param_name]) && !empty($_GET[$url_param_name])) {
                 $param_value = $_GET[$url_param_name];
-                $tag = $param_value;
-                if (!empty($url_param_prefix)) {
-                    $tag = $url_param_prefix . '-' . $tag;
-                }
-                $tags[] = sanitize_text_field($tag);
+                $tags[] = sanitize_text_field($param_value);
             }
         }
 
@@ -1396,46 +1177,20 @@ class MemberPress_ActiveCampaign_Integration {
     private function extract_tags_from_url($url) {
         $tags = array();
         $settings = get_option($this->option_name, array());
-
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
 
         if (empty($url)) {
             return $tags;
         }
 
-        // Page Slug extrahieren
-        if ($enable_page_slug) {
-            $path = parse_url($url, PHP_URL_PATH);
-            if ($path) {
-                $url_parts = explode('/', rtrim($path, '/'));
-                $page_slug = end($url_parts);
-
-                if (!empty($page_slug) && $page_slug !== '') {
-                    $tag = $page_slug;
-                    if (!empty($page_slug_prefix)) {
-                        $tag = $page_slug_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
-                }
-            }
-        }
-
         // URL Parameter extrahieren
-        if ($enable_url_param && !empty($url_param_name)) {
+        if (!empty($url_param_name)) {
             $query = parse_url($url, PHP_URL_QUERY);
             if ($query) {
                 parse_str($query, $params);
                 if (isset($params[$url_param_name]) && !empty($params[$url_param_name])) {
                     $param_value = $params[$url_param_name];
-                    $tag = $param_value;
-                    if (!empty($url_param_prefix)) {
-                        $tag = $url_param_prefix . '-' . $tag;
-                    }
-                    $tags[] = sanitize_text_field($tag);
+                    $tags[] = sanitize_text_field($param_value);
                 }
             }
         }
@@ -1640,49 +1395,6 @@ class MemberPress_ActiveCampaign_Integration {
 
         $this->log_error('Tag assignment failed with code ' . $assign_code . ': ' . wp_remote_retrieve_body($assign_response));
         return false;
-    }
-
-    private function should_skip_tracking($tags) {
-        $settings = get_option($this->option_name, array());
-
-        $require_url_param = isset($settings['require_url_param']) ? $settings['require_url_param'] : false;
-        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
-        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
-
-        // Nur prüfen, wenn require_url_param aktiv, page_slug deaktiviert und url_param aktiviert ist
-        if (!$require_url_param || $enable_page_slug || !$enable_url_param) {
-            return false;
-        }
-
-        // Prüfe, ob ein URL Parameter Tag vorhanden ist
-        $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
-        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
-
-        // Wenn keine Tags vorhanden sind, überspringen
-        if (empty($tags)) {
-            return true;
-        }
-
-        // Prüfe, ob mindestens ein Tag vom URL Parameter stammt
-        // Dies ist der Fall, wenn ein Tag mit dem url_param_prefix beginnt oder
-        // wenn wir direkt prüfen können, ob der Parameter in der URL war
-        $has_url_param_tag = false;
-
-        foreach ($tags as $tag) {
-            // Wenn ein Prefix gesetzt ist, prüfe ob das Tag damit beginnt
-            if (!empty($url_param_prefix)) {
-                if (strpos($tag, $url_param_prefix . '-') === 0) {
-                    $has_url_param_tag = true;
-                    break;
-                }
-            } else {
-                // Ohne Prefix können wir nicht sicher unterscheiden, also akzeptieren wir jedes Tag
-                $has_url_param_tag = true;
-                break;
-            }
-        }
-
-        return !$has_url_param_tag;
     }
 
     private function is_configured() {
