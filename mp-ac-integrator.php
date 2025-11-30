@@ -119,28 +119,22 @@ class MemberPress_ActiveCampaign_Integration {
             $sanitized['api_key'] = sanitize_text_field($input['api_key']);
         }
 
-        if (isset($input['enable_page_slug'])) {
-            $sanitized['enable_page_slug'] = (bool) $input['enable_page_slug'];
-        }
-
-        if (isset($input['enable_url_param'])) {
-            $sanitized['enable_url_param'] = (bool) $input['enable_url_param'];
-        }
+        // Checkboxen: Explizit false setzen wenn nicht vorhanden
+        $sanitized['enable_page_slug'] = isset($input['enable_page_slug']) ? true : false;
+        $sanitized['enable_url_param'] = isset($input['enable_url_param']) ? true : false;
+        $sanitized['require_url_param'] = isset($input['require_url_param']) ? true : false;
 
         if (isset($input['url_param_name'])) {
             $sanitized['url_param_name'] = sanitize_key($input['url_param_name']);
         }
 
+        // Prefix-Felder: sanitize_text_field verwenden statt sanitize_key
         if (isset($input['page_slug_prefix'])) {
-            $sanitized['page_slug_prefix'] = sanitize_key($input['page_slug_prefix']);
+            $sanitized['page_slug_prefix'] = sanitize_text_field($input['page_slug_prefix']);
         }
 
         if (isset($input['url_param_prefix'])) {
-            $sanitized['url_param_prefix'] = sanitize_key($input['url_param_prefix']);
-        }
-
-        if (isset($input['require_url_param'])) {
-            $sanitized['require_url_param'] = (bool) $input['require_url_param'];
+            $sanitized['url_param_prefix'] = sanitize_text_field($input['url_param_prefix']);
         }
 
         return $sanitized;
