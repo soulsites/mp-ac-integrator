@@ -50,6 +50,12 @@ class MemberPress_ActiveCampaign_Integration {
         add_action('wp_ajax_mepr_ac_test_connection', array($this, 'ajax_test_connection'));
         add_action('wp_ajax_mepr_ac_send_test', array($this, 'ajax_send_test'));
 
+        // Session starten für Tag-Speicherung
+        add_action('init', array($this, 'maybe_start_session'));
+
+        // Tags beim Seitenaufruf speichern
+        add_action('template_redirect', array($this, 'capture_tags'));
+
         // MemberPress Hook
         if ($this->is_configured()) {
             add_action('mepr-signup', array($this, 'handle_signup'), 10, 1);
@@ -57,6 +63,31 @@ class MemberPress_ActiveCampaign_Integration {
 
         // Admin Notices
         add_action('admin_notices', array($this, 'admin_notices'));
+    }
+
+    public function maybe_start_session() {
+        if (!session_id() && !headers_sent()) {
+            session_start();
+        }
+    }
+
+    public function capture_tags() {
+        // Nur auf Frontend-Seiten ausführen
+        if (is_admin()) {
+            return;
+        }
+
+        // Tags aus der aktuellen URL extrahieren
+        $tags = $this->extract_tags_from_current_url();
+
+        // Wenn Tags gefunden wurden, in Session speichern
+        if (!empty($tags)) {
+            $_SESSION['mepr_ac_tags'] = $tags;
+            $_SESSION['mepr_ac_tags_timestamp'] = time();
+
+            // Debug Logging
+            $this->log_error('Tags captured and stored in session: ' . implode(', ', $tags));
+        }
     }
 
     public function add_admin_menu() {
@@ -572,9 +603,21 @@ class MemberPress_ActiveCampaign_Integration {
             $first_name = isset($user->first_name) ? sanitize_text_field($user->first_name) : '';
             $last_name = isset($user->last_name) ? sanitize_text_field($user->last_name) : '';
 
-            $tags = $this->extract_tags();
+            // Versuche zuerst Tags aus der Session zu laden
+            $tags = $this->get_stored_tags();
+
+            // Fallback: Versuche Tags aus dem Referer zu extrahieren (alte Methode)
+            if (empty($tags)) {
+                $this->log_error('No tags in session, falling back to referer extraction');
+                $tags = $this->extract_tags();
+            } else {
+                $this->log_error('Using tags from session: ' . implode(', ', $tags));
+            }
 
             $this->send_to_activecampaign($email, $first_name, $last_name, $tags);
+
+            // Session Tags löschen nach erfolgreicher Verwendung
+            $this->clear_stored_tags();
 
         } catch (Exception $e) {
             $this->log_error('Exception in handle_signup: ' . $e->getMessage());
@@ -635,6 +678,76 @@ class MemberPress_ActiveCampaign_Integration {
         }
 
         return array_unique(array_filter($tags));
+    }
+
+    private function extract_tags_from_current_url() {
+        $tags = array();
+        $settings = get_option($this->option_name, array());
+
+        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
+        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
+        $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
+        $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
+        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
+
+        // Aktuelle URL verwenden statt Referer
+        $current_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://" . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+
+        // Page Slug extrahieren
+        if ($enable_page_slug) {
+            $path = parse_url($current_url, PHP_URL_PATH);
+            if ($path) {
+                $url_parts = explode('/', rtrim($path, '/'));
+                $page_slug = end($url_parts);
+
+                if (!empty($page_slug) && $page_slug !== '') {
+                    $tag = $page_slug;
+                    if (!empty($page_slug_prefix)) {
+                        $tag = $page_slug_prefix . '-' . $tag;
+                    }
+                    $tags[] = sanitize_text_field($tag);
+                }
+            }
+        }
+
+        // URL Parameter extrahieren - direkt aus $_GET
+        if ($enable_url_param && !empty($url_param_name)) {
+            if (isset($_GET[$url_param_name]) && !empty($_GET[$url_param_name])) {
+                $param_value = $_GET[$url_param_name];
+                $tag = $param_value;
+                if (!empty($url_param_prefix)) {
+                    $tag = $url_param_prefix . '-' . $tag;
+                }
+                $tags[] = sanitize_text_field($tag);
+            }
+        }
+
+        return array_unique(array_filter($tags));
+    }
+
+    private function get_stored_tags() {
+        if (!isset($_SESSION['mepr_ac_tags'])) {
+            return array();
+        }
+
+        // Tags nur verwenden, wenn sie nicht älter als 1 Stunde sind
+        $timestamp = isset($_SESSION['mepr_ac_tags_timestamp']) ? $_SESSION['mepr_ac_tags_timestamp'] : 0;
+        if (time() - $timestamp > 3600) {
+            $this->log_error('Stored tags expired (older than 1 hour)');
+            $this->clear_stored_tags();
+            return array();
+        }
+
+        return $_SESSION['mepr_ac_tags'];
+    }
+
+    private function clear_stored_tags() {
+        if (isset($_SESSION['mepr_ac_tags'])) {
+            unset($_SESSION['mepr_ac_tags']);
+        }
+        if (isset($_SESSION['mepr_ac_tags_timestamp'])) {
+            unset($_SESSION['mepr_ac_tags_timestamp']);
+        }
     }
 
     private function send_to_activecampaign($email, $first_name = '', $last_name = '', $tags = array()) {
