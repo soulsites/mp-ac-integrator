@@ -139,6 +139,10 @@ class MemberPress_ActiveCampaign_Integration {
             $sanitized['url_param_prefix'] = sanitize_key($input['url_param_prefix']);
         }
 
+        if (isset($input['require_url_param'])) {
+            $sanitized['require_url_param'] = (bool) $input['require_url_param'];
+        }
+
         return $sanitized;
     }
 
@@ -155,29 +159,27 @@ class MemberPress_ActiveCampaign_Integration {
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
         $page_slug_prefix = isset($settings['page_slug_prefix']) ? $settings['page_slug_prefix'] : '';
         $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
+        $require_url_param = isset($settings['require_url_param']) ? $settings['require_url_param'] : false;
 
         ?>
-        <div class="wrap">
+        <div class="wrap mepr-ac-settings">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
 
             <?php if (!$this->check_memberpress_active()): ?>
-                <div class="notice notice-error">
+                <div class="mepr-ac-notice mepr-ac-notice-error">
                     <p><strong><?php _e('MemberPress ist nicht aktiv!', 'mepr-ac-integration'); ?></strong></p>
                     <p><?php _e('Dieses Plugin benötigt MemberPress um zu funktionieren.', 'mepr-ac-integration'); ?></p>
                 </div>
             <?php endif; ?>
 
-            <form method="post" action="options.php" id="mepr-ac-settings-form">
+            <form method="post" action="options.php" id="mepr-ac-settings-form" class="mepr-ac-form">
                 <?php
                 settings_fields('mepr_ac_settings_group');
                 ?>
 
-                <table class="form-table">
-                    <tr>
-                        <th colspan="2">
-                            <h2><?php _e('ActiveCampaign API Einstellungen', 'mepr-ac-integration'); ?></h2>
-                        </th>
-                    </tr>
+                <div class="mepr-ac-card">
+                    <h2 class="mepr-ac-card-title"><?php _e('ActiveCampaign API Einstellungen', 'mepr-ac-integration'); ?></h2>
+                <table class="form-table mepr-ac-table">
 
                     <tr>
                         <th scope="row">
@@ -223,12 +225,12 @@ class MemberPress_ActiveCampaign_Integration {
                             <span id="connection-result" style="margin-left: 10px;"></span>
                         </td>
                     </tr>
+                </table>
+                </div>
 
-                    <tr>
-                        <th colspan="2">
-                            <h2><?php _e('Tag Einstellungen', 'mepr-ac-integration'); ?></h2>
-                        </th>
-                    </tr>
+                <div class="mepr-ac-card">
+                    <h2 class="mepr-ac-card-title"><?php _e('Tag Einstellungen', 'mepr-ac-integration'); ?></h2>
+                <table class="form-table mepr-ac-table">
 
                     <tr>
                         <th scope="row">
@@ -334,17 +336,41 @@ class MemberPress_ActiveCampaign_Integration {
                             </p>
                         </td>
                     </tr>
-                </table>
 
-                <?php submit_button(); ?>
+                    <tr id="require_param_row" style="display: none;">
+                        <th scope="row">
+                            <label for="require_url_param">
+                                <?php _e('Parameter erforderlich', 'mepr-ac-integration'); ?>
+                            </label>
+                        </th>
+                        <td>
+                            <label>
+                                <input type="checkbox"
+                                       id="require_url_param"
+                                       name="<?php echo $this->option_name; ?>[require_url_param]"
+                                       value="1"
+                                    <?php checked($require_url_param, true); ?>>
+                                <?php _e('Aktiviert', 'mepr-ac-integration'); ?>
+                            </label>
+                            <p class="description">
+                                <?php _e('Kein Tracking durchführen, wenn kein URL Parameter vorhanden ist.', 'mepr-ac-integration'); ?><br>
+                                <?php _e('Diese Option ist nur aktiv, wenn Page Slug Tracking deaktiviert und URL Parameter Tracking aktiviert ist.', 'mepr-ac-integration'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+                </div>
+
+                <?php submit_button(__('Einstellungen speichern', 'mepr-ac-integration'), 'primary mepr-ac-button-primary'); ?>
             </form>
 
-            <hr>
+            <div class="mepr-ac-divider"></div>
 
-            <h2><?php _e('Test Funktion', 'mepr-ac-integration'); ?></h2>
-            <p><?php _e('Sende eine Test-E-Mail mit einem Tag zu ActiveCampaign um die Integration zu testen.', 'mepr-ac-integration'); ?></p>
+            <div class="mepr-ac-card">
+                <h2 class="mepr-ac-card-title"><?php _e('Test Funktion', 'mepr-ac-integration'); ?></h2>
+                <p class="mepr-ac-description"><?php _e('Sende eine Test-E-Mail mit einem Tag zu ActiveCampaign um die Integration zu testen.', 'mepr-ac-integration'); ?></p>
 
-            <table class="form-table">
+            <table class="form-table mepr-ac-table">
                 <tr>
                     <th scope="row">
                         <label for="test_email"><?php _e('Test E-Mail', 'mepr-ac-integration'); ?></label>
@@ -379,10 +405,12 @@ class MemberPress_ActiveCampaign_Integration {
                     </td>
                 </tr>
             </table>
+            </div>
 
-            <hr>
+            <div class="mepr-ac-divider"></div>
 
-            <h2><?php _e('Wie es funktioniert', 'mepr-ac-integration'); ?></h2>
+            <div class="mepr-ac-card">
+            <h2 class="mepr-ac-card-title"><?php _e('Wie es funktioniert', 'mepr-ac-integration'); ?></h2>
             <ol>
                 <li><?php _e('Wenn sich jemand über ein MemberPress Registrierungsformular anmeldet, wird die E-Mail automatisch zu ActiveCampaign gesendet.', 'mepr-ac-integration'); ?></li>
                 <li><?php _e('Der Contact wird in ActiveCampaign erstellt oder aktualisiert.', 'mepr-ac-integration'); ?></li>
@@ -422,10 +450,31 @@ class MemberPress_ActiveCampaign_Integration {
                 </tr>
                 </tbody>
             </table>
+            </div>
         </div>
 
         <script type="text/javascript">
             jQuery(document).ready(function($) {
+                // Bedingte Anzeige der "Parameter erforderlich" Checkbox
+                function toggleRequireParamRow() {
+                    var pageSlugEnabled = $('#enable_page_slug').is(':checked');
+                    var urlParamEnabled = $('#enable_url_param').is(':checked');
+
+                    if (!pageSlugEnabled && urlParamEnabled) {
+                        $('#require_param_row').show();
+                    } else {
+                        $('#require_param_row').hide();
+                    }
+                }
+
+                // Initial anzeigen/verstecken
+                toggleRequireParamRow();
+
+                // Bei Änderungen aktualisieren
+                $('#enable_page_slug, #enable_url_param').on('change', function() {
+                    toggleRequireParamRow();
+                });
+
                 // Test Connection
                 $('#test-connection').on('click', function() {
                     var button = $(this);
@@ -502,14 +551,388 @@ class MemberPress_ActiveCampaign_Integration {
         </script>
 
         <style>
-            #mepr-ac-settings-form h2 {
-                padding: 10px 0;
-                border-bottom: 1px solid #ccc;
-                margin-bottom: 20px;
+            /* Material Design M3 Styles - Scoped to .mepr-ac-settings */
+
+            /* ========== Color Palette ========== */
+            .mepr-ac-settings {
+                --mepr-primary: #F3A400;
+                --mepr-primary-dark: #D99000;
+                --mepr-primary-light: #FFB825;
+                --mepr-on-primary: #FFFFFF;
+                --mepr-surface: #FFFFFF;
+                --mepr-surface-variant: #F5F5F5;
+                --mepr-outline: #E0E0E0;
+                --mepr-outline-variant: #C9C9C9;
+                --mepr-on-surface: #1C1B1F;
+                --mepr-on-surface-variant: #49454F;
+                --mepr-error: #BA1A1A;
+                --mepr-success: #0F9D58;
+                --mepr-shadow: rgba(0, 0, 0, 0.12);
+                --mepr-elevation-1: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+                --mepr-elevation-2: 0 2px 4px 0 rgba(0, 0, 0, 0.08);
+                --mepr-elevation-3: 0 4px 8px 0 rgba(0, 0, 0, 0.12);
             }
-            #connection-result,
-            #test-result {
-                font-weight: bold;
+
+            /* ========== Typography ========== */
+            .mepr-ac-settings {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+                color: var(--mepr-on-surface);
+                line-height: 1.6;
+            }
+
+            .mepr-ac-settings h1 {
+                font-size: 32px;
+                font-weight: 400;
+                letter-spacing: 0;
+                margin: 0 0 24px 0;
+                color: var(--mepr-on-surface);
+            }
+
+            /* ========== Cards ========== */
+            .mepr-ac-settings .mepr-ac-card {
+                background: var(--mepr-surface);
+                border-radius: 12px;
+                box-shadow: var(--mepr-elevation-1);
+                padding: 24px;
+                margin-bottom: 16px;
+                transition: box-shadow 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+                border: 1px solid var(--mepr-outline);
+            }
+
+            .mepr-ac-settings .mepr-ac-card:hover {
+                box-shadow: var(--mepr-elevation-2);
+            }
+
+            .mepr-ac-settings .mepr-ac-card-title {
+                font-size: 22px;
+                font-weight: 500;
+                letter-spacing: 0;
+                margin: 0 0 16px 0;
+                color: var(--mepr-on-surface);
+                padding: 0;
+                border: none;
+            }
+
+            .mepr-ac-settings .mepr-ac-description {
+                font-size: 14px;
+                color: var(--mepr-on-surface-variant);
+                margin: 0 0 16px 0;
+            }
+
+            /* ========== Form Tables ========== */
+            .mepr-ac-settings .mepr-ac-table {
+                margin: 0;
+            }
+
+            .mepr-ac-settings .mepr-ac-table tr {
+                border-bottom: 1px solid var(--mepr-outline);
+            }
+
+            .mepr-ac-settings .mepr-ac-table tr:last-child {
+                border-bottom: none;
+            }
+
+            .mepr-ac-settings .mepr-ac-table th {
+                padding: 16px 16px 16px 0;
+                font-weight: 500;
+                font-size: 14px;
+                color: var(--mepr-on-surface);
+                width: 200px;
+                vertical-align: top;
+            }
+
+            .mepr-ac-settings .mepr-ac-table td {
+                padding: 16px 0;
+            }
+
+            .mepr-ac-settings .mepr-ac-table label {
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--mepr-on-surface);
+            }
+
+            .mepr-ac-settings .mepr-ac-table .description {
+                font-size: 12px;
+                color: var(--mepr-on-surface-variant);
+                margin: 8px 0 0 0;
+                line-height: 1.5;
+            }
+
+            /* ========== Input Fields ========== */
+            .mepr-ac-settings input[type="text"],
+            .mepr-ac-settings input[type="email"],
+            .mepr-ac-settings input[type="url"] {
+                border: 1px solid var(--mepr-outline);
+                border-radius: 4px;
+                padding: 12px 16px;
+                font-size: 14px;
+                line-height: 1.5;
+                background: var(--mepr-surface);
+                color: var(--mepr-on-surface);
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: none;
+            }
+
+            .mepr-ac-settings input[type="text"]:focus,
+            .mepr-ac-settings input[type="email"]:focus,
+            .mepr-ac-settings input[type="url"]:focus {
+                outline: none;
+                border-color: var(--mepr-primary);
+                box-shadow: 0 0 0 2px rgba(243, 164, 0, 0.1);
+            }
+
+            .mepr-ac-settings input[type="text"]::placeholder,
+            .mepr-ac-settings input[type="email"]::placeholder,
+            .mepr-ac-settings input[type="url"]::placeholder {
+                color: var(--mepr-on-surface-variant);
+                opacity: 0.6;
+            }
+
+            /* ========== Checkboxes ========== */
+            .mepr-ac-settings input[type="checkbox"] {
+                width: 18px;
+                height: 18px;
+                border: 2px solid var(--mepr-outline-variant);
+                border-radius: 2px;
+                margin-right: 8px;
+                cursor: pointer;
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .mepr-ac-settings input[type="checkbox"]:checked {
+                background-color: var(--mepr-primary);
+                border-color: var(--mepr-primary);
+            }
+
+            .mepr-ac-settings input[type="checkbox"]:focus {
+                outline: none;
+                box-shadow: 0 0 0 2px rgba(243, 164, 0, 0.2);
+            }
+
+            /* ========== Buttons ========== */
+            .mepr-ac-settings .button,
+            .mepr-ac-settings button {
+                border-radius: 20px;
+                padding: 10px 24px;
+                font-size: 14px;
+                font-weight: 500;
+                letter-spacing: 0.1px;
+                text-transform: none;
+                transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: none;
+                border: none;
+                cursor: pointer;
+                height: auto;
+                line-height: 1.5;
+            }
+
+            /* Primary Button Override */
+            .mepr-ac-settings .button-primary,
+            .mepr-ac-settings .mepr-ac-button-primary,
+            .mepr-ac-settings #submit {
+                background: var(--mepr-primary) !important;
+                color: var(--mepr-on-primary) !important;
+                border: none !important;
+                box-shadow: var(--mepr-elevation-1) !important;
+                text-shadow: none !important;
+            }
+
+            .mepr-ac-settings .button-primary:hover,
+            .mepr-ac-settings .mepr-ac-button-primary:hover,
+            .mepr-ac-settings #submit:hover {
+                background: var(--mepr-primary-dark) !important;
+                box-shadow: var(--mepr-elevation-2) !important;
+                transform: translateY(-1px);
+            }
+
+            .mepr-ac-settings .button-primary:active,
+            .mepr-ac-settings .mepr-ac-button-primary:active,
+            .mepr-ac-settings #submit:active {
+                background: var(--mepr-primary-dark) !important;
+                box-shadow: var(--mepr-elevation-1) !important;
+                transform: translateY(0);
+            }
+
+            .mepr-ac-settings .button-primary:focus,
+            .mepr-ac-settings .mepr-ac-button-primary:focus,
+            .mepr-ac-settings #submit:focus {
+                box-shadow: 0 0 0 3px rgba(243, 164, 0, 0.3) !important;
+            }
+
+            /* Secondary Button */
+            .mepr-ac-settings .button-secondary {
+                background: var(--mepr-surface) !important;
+                color: var(--mepr-primary) !important;
+                border: 1px solid var(--mepr-outline) !important;
+                box-shadow: none !important;
+            }
+
+            .mepr-ac-settings .button-secondary:hover {
+                background: var(--mepr-surface-variant) !important;
+                border-color: var(--mepr-primary) !important;
+                box-shadow: var(--mepr-elevation-1) !important;
+            }
+
+            .mepr-ac-settings .button-secondary:active {
+                background: var(--mepr-surface-variant) !important;
+            }
+
+            .mepr-ac-settings .button-secondary:focus {
+                box-shadow: 0 0 0 3px rgba(243, 164, 0, 0.2) !important;
+            }
+
+            .mepr-ac-settings .button:disabled,
+            .mepr-ac-settings button:disabled {
+                opacity: 0.38;
+                cursor: not-allowed;
+            }
+
+            /* ========== Notices ========== */
+            .mepr-ac-settings .mepr-ac-notice {
+                border-radius: 8px;
+                padding: 16px;
+                margin: 16px 0;
+                border-left: 4px solid;
+            }
+
+            .mepr-ac-settings .mepr-ac-notice-error {
+                background: #FEF1F1;
+                border-left-color: var(--mepr-error);
+                color: #5F2120;
+            }
+
+            .mepr-ac-settings .mepr-ac-notice-error p {
+                margin: 0;
+            }
+
+            /* ========== Divider ========== */
+            .mepr-ac-settings .mepr-ac-divider {
+                height: 1px;
+                background: var(--mepr-outline);
+                margin: 32px 0;
+                border: none;
+            }
+
+            /* ========== Status Messages ========== */
+            .mepr-ac-settings #connection-result,
+            .mepr-ac-settings #test-result {
+                font-weight: 500;
+                font-size: 14px;
+                display: inline-block;
+                padding: 6px 12px;
+                border-radius: 16px;
+                transition: all 0.2s;
+            }
+
+            .mepr-ac-settings #connection-result span[style*="green"],
+            .mepr-ac-settings #test-result span[style*="green"] {
+                color: var(--mepr-success) !important;
+                background: rgba(15, 157, 88, 0.1);
+                padding: 6px 12px;
+                border-radius: 16px;
+            }
+
+            .mepr-ac-settings #connection-result span[style*="red"],
+            .mepr-ac-settings #test-result span[style*="red"] {
+                color: var(--mepr-error) !important;
+                background: rgba(186, 26, 26, 0.1);
+                padding: 6px 12px;
+                border-radius: 16px;
+            }
+
+            /* ========== Lists ========== */
+            .mepr-ac-settings ol,
+            .mepr-ac-settings ul {
+                margin: 16px 0;
+                padding-left: 24px;
+            }
+
+            .mepr-ac-settings ol li,
+            .mepr-ac-settings ul li {
+                margin: 8px 0;
+                color: var(--mepr-on-surface);
+                line-height: 1.6;
+            }
+
+            .mepr-ac-settings ul ul {
+                margin-top: 8px;
+            }
+
+            /* ========== Tables (Example Table) ========== */
+            .mepr-ac-settings .wp-list-table {
+                border-radius: 8px;
+                overflow: hidden;
+                border: 1px solid var(--mepr-outline);
+                margin-top: 16px;
+            }
+
+            .mepr-ac-settings .wp-list-table thead th {
+                background: var(--mepr-surface-variant);
+                font-weight: 500;
+                font-size: 14px;
+                padding: 12px 16px;
+                border-bottom: 1px solid var(--mepr-outline);
+            }
+
+            .mepr-ac-settings .wp-list-table tbody td {
+                padding: 12px 16px;
+                font-size: 14px;
+                border-bottom: 1px solid var(--mepr-outline);
+            }
+
+            .mepr-ac-settings .wp-list-table tbody tr:last-child td {
+                border-bottom: none;
+            }
+
+            .mepr-ac-settings .wp-list-table.striped > tbody > tr:nth-child(odd) {
+                background: var(--mepr-surface-variant);
+            }
+
+            .mepr-ac-settings .wp-list-table code {
+                background: rgba(243, 164, 0, 0.1);
+                color: var(--mepr-primary-dark);
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+
+            /* ========== Code Elements ========== */
+            .mepr-ac-settings code {
+                background: rgba(243, 164, 0, 0.1);
+                color: var(--mepr-primary-dark);
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-size: 13px;
+                font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+            }
+
+            /* ========== Transitions & Animations ========== */
+            .mepr-ac-settings * {
+                transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            /* ========== Responsive ========== */
+            @media (max-width: 782px) {
+                .mepr-ac-settings .mepr-ac-card {
+                    padding: 16px;
+                }
+
+                .mepr-ac-settings .mepr-ac-table th,
+                .mepr-ac-settings .mepr-ac-table td {
+                    display: block;
+                    width: 100%;
+                    padding: 8px 0;
+                }
+
+                .mepr-ac-settings .mepr-ac-table th {
+                    padding-bottom: 4px;
+                }
+
+                .mepr-ac-settings .button,
+                .mepr-ac-settings button {
+                    width: 100%;
+                    margin-bottom: 8px;
+                }
             }
         </style>
         <?php
@@ -625,6 +1048,13 @@ class MemberPress_ActiveCampaign_Integration {
             if (empty($tags)) {
                 $this->log_error('No tags in POST or session, falling back to referer extraction');
                 $tags = $this->extract_tags();
+            }
+
+            // Prüfe, ob Tracking übersprungen werden soll
+            if ($this->should_skip_tracking($tags)) {
+                $this->log_error('Tracking skipped: require_url_param is enabled but no URL parameter found');
+                $this->clear_stored_tags();
+                return;
             }
 
             $this->send_to_activecampaign($email, $first_name, $last_name, $tags);
@@ -967,6 +1397,49 @@ class MemberPress_ActiveCampaign_Integration {
 
         $this->log_error('Tag assignment failed with code ' . $assign_code . ': ' . wp_remote_retrieve_body($assign_response));
         return false;
+    }
+
+    private function should_skip_tracking($tags) {
+        $settings = get_option($this->option_name, array());
+
+        $require_url_param = isset($settings['require_url_param']) ? $settings['require_url_param'] : false;
+        $enable_page_slug = isset($settings['enable_page_slug']) ? $settings['enable_page_slug'] : true;
+        $enable_url_param = isset($settings['enable_url_param']) ? $settings['enable_url_param'] : true;
+
+        // Nur prüfen, wenn require_url_param aktiv, page_slug deaktiviert und url_param aktiviert ist
+        if (!$require_url_param || $enable_page_slug || !$enable_url_param) {
+            return false;
+        }
+
+        // Prüfe, ob ein URL Parameter Tag vorhanden ist
+        $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
+        $url_param_prefix = isset($settings['url_param_prefix']) ? $settings['url_param_prefix'] : '';
+
+        // Wenn keine Tags vorhanden sind, überspringen
+        if (empty($tags)) {
+            return true;
+        }
+
+        // Prüfe, ob mindestens ein Tag vom URL Parameter stammt
+        // Dies ist der Fall, wenn ein Tag mit dem url_param_prefix beginnt oder
+        // wenn wir direkt prüfen können, ob der Parameter in der URL war
+        $has_url_param_tag = false;
+
+        foreach ($tags as $tag) {
+            // Wenn ein Prefix gesetzt ist, prüfe ob das Tag damit beginnt
+            if (!empty($url_param_prefix)) {
+                if (strpos($tag, $url_param_prefix . '-') === 0) {
+                    $has_url_param_tag = true;
+                    break;
+                }
+            } else {
+                // Ohne Prefix können wir nicht sicher unterscheiden, also akzeptieren wir jedes Tag
+                $has_url_param_tag = true;
+                break;
+            }
+        }
+
+        return !$has_url_param_tag;
     }
 
     private function is_configured() {
