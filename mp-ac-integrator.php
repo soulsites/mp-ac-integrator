@@ -1131,9 +1131,16 @@ class MemberPress_ActiveCampaign_Integration {
             // Tags aus verschiedenen Quellen sammeln
             $tags = $this->collect_tags_from_all_sources();
 
+            // Geburtstermin-Tag hinzufügen, falls das Feld für dieses Paket aktiv war
+            $geburtstermin_tag = $this->get_geburtstermin_tag($user->ID);
+            if ($geburtstermin_tag !== null) {
+                $tags[] = $geburtstermin_tag;
+                $this->log_error('Geburtstermin tag added: ' . $geburtstermin_tag);
+            }
+
             // Wenn keine Tags gefunden wurden, kein Tracking durchführen
             if (empty($tags)) {
-                $this->log_error('No tags found - skipping ActiveCampaign tagging (no URL parameter present)');
+                $this->log_error('No tags found - skipping ActiveCampaign tagging');
                 $this->clear_stored_tags();
                 return;
             }
@@ -1605,6 +1612,28 @@ class MemberPress_ActiveCampaign_Integration {
         $this->log_error('ERROR: Tag assignment failed with code ' . $assign_code);
         $this->log_error('=== TAG ASSIGNMENT FAILED ===');
         return false;
+    }
+
+    private function get_geburtstermin_tag($user_id) {
+        if (!metadata_exists('user', $user_id, 'mepr_errechneter_geburtstermin')) {
+            $this->log_error('Geburtstermin field not present for user ' . $user_id);
+            return null;
+        }
+
+        $value = get_user_meta($user_id, 'mepr_errechneter_geburtstermin', true);
+
+        if (empty($value)) {
+            $this->log_error('Geburtstermin field is empty for user ' . $user_id);
+            return null;
+        }
+
+        $timestamp = strtotime($value);
+        if ($timestamp === false) {
+            $this->log_error('Geburtstermin field has unparseable value: ' . $value);
+            return null;
+        }
+
+        return 'GEBTERMIN-' . date('Y-m-d', $timestamp);
     }
 
     private function is_configured() {
