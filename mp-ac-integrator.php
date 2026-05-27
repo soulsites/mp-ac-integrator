@@ -42,6 +42,7 @@ class MemberPress_ActiveCampaign_Integration {
     private $option_name = 'mepr_ac_settings';
     private $api_url = '';
     private $api_key = '';
+    private $geburtstermin_field_id = '';
 
     public static function get_instance() {
         if (self::$instance === null) {
@@ -59,6 +60,7 @@ class MemberPress_ActiveCampaign_Integration {
         $settings = get_option($this->option_name, array());
         $this->api_url = isset($settings['api_url']) ? sanitize_text_field($settings['api_url']) : '';
         $this->api_key = isset($settings['api_key']) ? sanitize_text_field($settings['api_key']) : '';
+        $this->geburtstermin_field_id = isset($settings['geburtstermin_field_id']) ? sanitize_text_field($settings['geburtstermin_field_id']) : '';
     }
 
     private function init_hooks() {
@@ -350,6 +352,13 @@ class MemberPress_ActiveCampaign_Integration {
         // Debug Mode
         $sanitized['debug_mode'] = isset($input['debug_mode']) ? '1' : '0';
 
+        // ActiveCampaign Field ID für Geburtstermin (Custom Field, Typ Datum)
+        if (isset($input['geburtstermin_field_id']) && $input['geburtstermin_field_id'] !== '') {
+            $sanitized['geburtstermin_field_id'] = (string) absint($input['geburtstermin_field_id']);
+        } else {
+            $sanitized['geburtstermin_field_id'] = '';
+        }
+
         return $sanitized;
     }
 
@@ -363,6 +372,7 @@ class MemberPress_ActiveCampaign_Integration {
         $api_key = isset($settings['api_key']) ? $settings['api_key'] : '';
         $url_param_name = isset($settings['url_param_name']) ? $settings['url_param_name'] : 'source';
         $debug_mode = isset($settings['debug_mode']) && $settings['debug_mode'] === '1';
+        $geburtstermin_field_id = isset($settings['geburtstermin_field_id']) ? $settings['geburtstermin_field_id'] : '';
 
         ?>
         <div class="wrap mepr-ac-settings">
@@ -478,6 +488,33 @@ class MemberPress_ActiveCampaign_Integration {
                         </td>
                     </tr>
                 </table>
+                </div>
+
+                <div class="mepr-ac-card">
+                    <h2 class="mepr-ac-card-title"><?php _e('Geburtstermin Custom Field', 'mepr-ac-integration'); ?></h2>
+                    <p class="mepr-ac-description">
+                        <?php _e('Wenn du in ActiveCampaign ein eigenes Feld (Typ "Date") für den Geburtstermin angelegt hast, trage hier dessen ID ein. Der Geburtstermin wird dann zusätzlich als richtiges Datum in diese Spalte übertragen. Der Tag <code>GEBTERMIN</code> wird weiterhin gesetzt.', 'mepr-ac-integration'); ?>
+                    </p>
+                    <table class="form-table mepr-ac-table">
+                        <tr>
+                            <th scope="row">
+                                <label for="geburtstermin_field_id"><?php _e('AC Field ID', 'mepr-ac-integration'); ?></label>
+                            </th>
+                            <td>
+                                <input type="number"
+                                       id="geburtstermin_field_id"
+                                       name="<?php echo $this->option_name; ?>[geburtstermin_field_id]"
+                                       value="<?php echo esc_attr($geburtstermin_field_id); ?>"
+                                       class="small-text"
+                                       min="1"
+                                       step="1"
+                                       placeholder="z.B. 12">
+                                <p class="description">
+                                    <?php _e('Die ID findest du in ActiveCampaign unter <em>Contacts → Fields</em>. Sie ist auch in der URL beim Bearbeiten des Felds sichtbar. Leer lassen, um nur den Tag zu senden.', 'mepr-ac-integration'); ?>
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
                 </div>
 
                 <?php submit_button(__('Einstellungen speichern', 'mepr-ac-integration'), 'primary mepr-ac-button-primary'); ?>
@@ -1138,6 +1175,14 @@ class MemberPress_ActiveCampaign_Integration {
                 $this->log_error('Geburtstermin tag added: ' . $geburtstermin_tag);
             }
 
+            // Geburtstermin zusätzlich als Custom Field (Datum) übertragen, falls Field ID konfiguriert
+            $field_values = array();
+            $geburtstermin_date = $this->get_geburtstermin_date($user->ID);
+            if ($geburtstermin_date !== null && !empty($this->geburtstermin_field_id)) {
+                $field_values[$this->geburtstermin_field_id] = $geburtstermin_date;
+                $this->log_error('Geburtstermin date field added (field ID ' . $this->geburtstermin_field_id . '): ' . $geburtstermin_date);
+            }
+
             // Wenn keine Tags gefunden wurden, kein Tracking durchführen
             if (empty($tags)) {
                 $this->log_error('No tags found - skipping ActiveCampaign tagging');
@@ -1147,7 +1192,7 @@ class MemberPress_ActiveCampaign_Integration {
 
             $this->log_error('Final tags to be sent to ActiveCampaign: ' . implode(', ', $tags));
 
-            $this->send_to_activecampaign($email, $first_name, $last_name, $tags);
+            $this->send_to_activecampaign($email, $first_name, $last_name, $tags, $field_values);
 
             // Cookies und Session Tags löschen nach erfolgreicher Verwendung
             $this->clear_stored_tags();
@@ -1406,7 +1451,7 @@ class MemberPress_ActiveCampaign_Integration {
         return $protocol . "://" . $host . $uri;
     }
 
-    private function send_to_activecampaign($email, $first_name = '', $last_name = '', $tags = array()) {
+    private function send_to_activecampaign($email, $first_name = '', $last_name = '', $tags = array(), $field_values = array()) {
         if (empty($email) || !is_email($email)) {
             return array('success' => false, 'message' => __('Ungültige E-Mail', 'mepr-ac-integration'));
         }
@@ -1427,6 +1472,17 @@ class MemberPress_ActiveCampaign_Integration {
 
         if (!empty($last_name)) {
             $contact_data['contact']['lastName'] = $last_name;
+        }
+
+        if (!empty($field_values) && is_array($field_values)) {
+            $contact_data['contact']['fieldValues'] = array();
+            foreach ($field_values as $field_id => $field_value) {
+                $contact_data['contact']['fieldValues'][] = array(
+                    'field' => (string) $field_id,
+                    'value' => $field_value,
+                );
+            }
+            $this->log_error('Including fieldValues in contact sync: ' . json_encode($contact_data['contact']['fieldValues']));
         }
 
         // Contact erstellen/aktualisieren
@@ -1615,6 +1671,14 @@ class MemberPress_ActiveCampaign_Integration {
     }
 
     private function get_geburtstermin_tag($user_id) {
+        $date = $this->get_geburtstermin_date($user_id);
+        if ($date === null) {
+            return null;
+        }
+        return 'GEBTERMIN';
+    }
+
+    private function get_geburtstermin_date($user_id) {
         if (!metadata_exists('user', $user_id, 'mepr_errechneter_geburtstermin')) {
             $this->log_error('Geburtstermin field not present for user ' . $user_id);
             return null;
@@ -1633,7 +1697,7 @@ class MemberPress_ActiveCampaign_Integration {
             return null;
         }
 
-        return 'GEBTERMIN-' . date('Y-m-d', $timestamp);
+        return date('Y-m-d', $timestamp);
     }
 
     private function is_configured() {
