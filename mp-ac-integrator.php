@@ -71,6 +71,7 @@ class MemberPress_ActiveCampaign_Integration {
         // AJAX Handlers
         add_action('wp_ajax_mepr_ac_test_connection', array($this, 'ajax_test_connection'));
         add_action('wp_ajax_mepr_ac_send_test', array($this, 'ajax_send_test'));
+        add_action('wp_ajax_mepr_ac_get_fields', array($this, 'ajax_get_ac_fields'));
 
         // Session starten für Tag-Speicherung
         add_action('init', array($this, 'maybe_start_session'));
@@ -493,25 +494,34 @@ class MemberPress_ActiveCampaign_Integration {
                 <div class="mepr-ac-card">
                     <h2 class="mepr-ac-card-title"><?php _e('Geburtstermin Custom Field', 'mepr-ac-integration'); ?></h2>
                     <p class="mepr-ac-description">
-                        <?php _e('Wenn du in ActiveCampaign ein eigenes Feld (Typ "Date") für den Geburtstermin angelegt hast, trage hier dessen ID ein. Der Geburtstermin wird dann zusätzlich als richtiges Datum in diese Spalte übertragen. Der Tag <code>GEBTERMIN</code> wird weiterhin gesetzt.', 'mepr-ac-integration'); ?>
+                        <?php _e('Wähle das ActiveCampaign-Feld (Typ "Datum"), in das der errechnete Geburtstermin übertragen werden soll. Der Tag <code>GEBTERMIN</code> wird weiterhin gesetzt.', 'mepr-ac-integration'); ?>
                     </p>
                     <table class="form-table mepr-ac-table">
                         <tr>
                             <th scope="row">
-                                <label for="geburtstermin_field_id"><?php _e('AC Field ID', 'mepr-ac-integration'); ?></label>
+                                <label for="geburtstermin_field_id"><?php _e('Datumsfeld', 'mepr-ac-integration'); ?></label>
                             </th>
                             <td>
-                                <input type="number"
-                                       id="geburtstermin_field_id"
-                                       name="<?php echo $this->option_name; ?>[geburtstermin_field_id]"
-                                       value="<?php echo esc_attr($geburtstermin_field_id); ?>"
-                                       class="small-text"
-                                       min="1"
-                                       step="1"
-                                       placeholder="z.B. 12">
-                                <p class="description">
-                                    <?php _e('Die ID findest du in ActiveCampaign unter <em>Contacts → Fields</em>. Sie ist auch in der URL beim Bearbeiten des Felds sichtbar. Leer lassen, um nur den Tag zu senden.', 'mepr-ac-integration'); ?>
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <select id="geburtstermin_field_id"
+                                            name="<?php echo $this->option_name; ?>[geburtstermin_field_id]"
+                                            style="min-width:280px;">
+                                        <option value=""><?php _e('— Felder zuerst laden —', 'mepr-ac-integration'); ?></option>
+                                        <?php if (!empty($geburtstermin_field_id)): ?>
+                                            <option value="<?php echo esc_attr($geburtstermin_field_id); ?>" selected>
+                                                <?php echo esc_html(sprintf(__('Gespeicherte ID: %s', 'mepr-ac-integration'), $geburtstermin_field_id)); ?>
+                                            </option>
+                                        <?php endif; ?>
+                                    </select>
+                                    <button type="button" id="load-ac-fields" class="button button-secondary">
+                                        <?php _e('Felder aus AC laden', 'mepr-ac-integration'); ?>
+                                    </button>
+                                    <span id="load-fields-result" style="margin-left:6px;"></span>
+                                </div>
+                                <p class="description" style="margin-top:6px;">
+                                    <?php _e('Klicke auf "Felder aus AC laden", um alle Custom Fields aus deinem ActiveCampaign-Konto zu holen. Wähle dann das Datumsfeld für den Geburtstermin. Leer lassen, um nur den Tag zu senden.', 'mepr-ac-integration'); ?>
                                 </p>
+                                <input type="hidden" id="geburtstermin_field_id_saved" value="<?php echo esc_attr($geburtstermin_field_id); ?>">
                             </td>
                         </tr>
                     </table>
@@ -681,6 +691,52 @@ class MemberPress_ActiveCampaign_Integration {
                         },
                         complete: function() {
                             button.prop('disabled', false).text('<?php _e('Test senden', 'mepr-ac-integration'); ?>');
+                        }
+                    });
+                });
+
+                // Load AC Fields for Geburtstermin dropdown
+                $('#load-ac-fields').on('click', function() {
+                    var button = $(this);
+                    var result = $('#load-fields-result');
+                    var select = $('#geburtstermin_field_id');
+                    var savedId = $('#geburtstermin_field_id_saved').val();
+
+                    button.prop('disabled', true).text('<?php _e('Lade...', 'mepr-ac-integration'); ?>');
+                    result.html('');
+
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'mepr_ac_get_fields',
+                            api_url: $('#api_url').val(),
+                            api_key: $('#api_key').val(),
+                            nonce: '<?php echo wp_create_nonce('mepr_ac_get_fields'); ?>'
+                        },
+                        success: function(response) {
+                            if (response.success) {
+                                var fields = response.data.fields;
+                                select.empty();
+                                select.append('<option value=""><?php _e('— Kein Feld auswählen —', 'mepr-ac-integration'); ?></option>');
+                                $.each(fields, function(i, field) {
+                                    var label = field.title + ' (' + field.type + ', ID: ' + field.id + ')';
+                                    var opt = $('<option>').val(field.id).text(label);
+                                    if (field.id === savedId) {
+                                        opt.prop('selected', true);
+                                    }
+                                    select.append(opt);
+                                });
+                                result.html('<span style="color:green;">✓ ' + fields.length + ' <?php _e('Felder geladen', 'mepr-ac-integration'); ?></span>');
+                            } else {
+                                result.html('<span style="color:red;">✗ ' + response.data.message + '</span>');
+                            }
+                        },
+                        error: function() {
+                            result.html('<span style="color:red;">✗ <?php _e('Fehler beim Laden', 'mepr-ac-integration'); ?></span>');
+                        },
+                        complete: function() {
+                            button.prop('disabled', false).text('<?php _e('Felder aus AC laden', 'mepr-ac-integration'); ?>');
                         }
                     });
                 });
@@ -1148,6 +1204,54 @@ class MemberPress_ActiveCampaign_Integration {
         } else {
             wp_send_json_error(array('message' => $result['message']));
         }
+    }
+
+    public function ajax_get_ac_fields() {
+        check_ajax_referer('mepr_ac_get_fields', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Keine Berechtigung', 'mepr-ac-integration')));
+        }
+
+        $api_url = isset($_POST['api_url']) ? esc_url_raw($_POST['api_url']) : '';
+        $api_key = isset($_POST['api_key']) ? sanitize_text_field($_POST['api_key']) : '';
+
+        if (empty($api_url) || empty($api_key)) {
+            wp_send_json_error(array('message' => __('Bitte zuerst API URL und Key eingeben und speichern.', 'mepr-ac-integration')));
+        }
+
+        $response = wp_remote_get(rtrim($api_url, '/') . '/api/3/fields?limit=100', array(
+            'headers' => array('Api-Token' => $api_key),
+            'timeout' => 15,
+        ));
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(array('message' => $response->get_error_message()));
+        }
+
+        $code = wp_remote_retrieve_response_code($response);
+        if ($code !== 200) {
+            wp_send_json_error(array('message' => sprintf(__('API Fehler: HTTP %d', 'mepr-ac-integration'), $code)));
+        }
+
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (!isset($body['fields'])) {
+            wp_send_json_error(array('message' => __('Keine Felder gefunden.', 'mepr-ac-integration')));
+        }
+
+        $fields = array();
+        foreach ($body['fields'] as $field) {
+            $fields[] = array(
+                'id'    => $field['id'],
+                'title' => $field['title'],
+                'type'  => $field['type'],
+            );
+        }
+
+        usort($fields, function($a, $b) { return strcmp($a['title'], $b['title']); });
+
+        wp_send_json_success(array('fields' => $fields));
     }
 
     public function handle_signup($event) {
